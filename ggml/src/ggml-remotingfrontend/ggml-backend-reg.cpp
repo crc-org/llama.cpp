@@ -142,7 +142,7 @@ ggml_backend_reg_t ggml_backend_remoting_frontend_reg() {
   ggml_backend_remoting_reg_init_devices(&reg);
 
   int cr = atexit(showTime);
-  assert(cr == 0);
+  GGML_ASSERT(cr == 0);
 
   return &reg;
 }
