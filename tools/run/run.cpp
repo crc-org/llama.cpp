@@ -1021,8 +1021,8 @@ static int generate(LlamaData & llama_data, const std::string & prompt, std::str
         return 1;
     }
 
-      int cr = atexit(show_timer);
-      assert(cr == 0);
+    int cr = atexit(show_timer);
+    GGML_ASSERT(cr == 0);
 
     // prepare a batch for the prompt
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
