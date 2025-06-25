@@ -10,6 +10,7 @@ ggml_add_backend_library(ggml-remotingfrontend
                          ggml-backend-reg.cpp
                          ggml-backend-buffer-type.cpp
                          ggml-backend-host-buffer-type.cpp
+                         ggml-metal-remoting.cpp
                          virtgpu.cpp
                          virtgpu-shm.cpp
                          virtgpu-utils.cpp
@@ -17,6 +18,7 @@ ggml_add_backend_library(ggml-remotingfrontend
                          virtgpu-forward-buffer-type.cpp
                          virtgpu-forward-buffer.cpp
                          virtgpu-forward-backend.cpp
+                         virtgpu-forward-metal.cpp
                          virtgpu-forward-impl.h
                          ../../include/ggml-remoting-frontend.h
                          venus_cs_ggml-rpc-front.cpp

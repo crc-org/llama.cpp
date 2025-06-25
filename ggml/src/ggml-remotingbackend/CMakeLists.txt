@@ -10,6 +10,7 @@ ggml_add_backend_library(ggml-remotingbackend
                          backend-dispatched-device.cpp
                          backend-dispatched-buffer.cpp
                          backend-dispatched-buffer-type.cpp
+                         backend-dispatched-metal.cpp
                          backend-utils.cpp
                          shared/api_remoting.h
                          shared/apir_backend.h

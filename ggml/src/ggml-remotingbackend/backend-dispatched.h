@@ -46,6 +46,9 @@ uint32_t backend_buffer_free_buffer(struct vn_cs_encoder *enc, struct vn_cs_deco
 /* backend */
 uint32_t backend_graph_compute(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 
+/* metal */
+uint32_t backend_metal_get_device_context(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
+
 static inline const char *backend_dispatch_command_name(ApirBackendCommandType type)
 {
   switch (type) {
@@ -76,6 +79,10 @@ static inline const char *backend_dispatch_command_name(ApirBackendCommandType t
 
   /* backend */
   case APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE: return "backend_graph_compute";
+
+  /* metal */
+  case APIR_COMMAND_TYPE_METAL_GET_DEVICE_CONTEXT: return "metal_get_device_context";
+
   default: return "unknown";
   }
 }
@@ -108,4 +115,7 @@ static const backend_dispatch_t apir_backend_dispatch_table[APIR_BACKEND_DISPATC
 
   /* backend */
   [APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE] = backend_graph_compute,
+
+  /* metal */
+  [APIR_COMMAND_TYPE_METAL_GET_DEVICE_CONTEXT] = backend_metal_get_device_context,
 };

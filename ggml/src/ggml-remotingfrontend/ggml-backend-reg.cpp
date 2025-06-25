@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "ggml-remoting.h"
+#include "ggml-metal-remoting.h"
 
 static struct virtgpu *apir_initialize() {
   static struct virtgpu *apir_gpu_instance = NULL;
@@ -79,11 +80,15 @@ static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
         ctx->description = desc;
 	ctx->gpu = gpu;
 
-        devices.push_back(new ggml_backend_device {
-            /* .iface   = */ ggml_backend_remoting_device_interface,
-            /* .reg     = */ reg,
-            /* .context = */ ctx,
-          });
+	ggml_backend_dev_t dev = new ggml_backend_device {
+	  /* .iface   = */ ggml_backend_remoting_device_interface,
+	  /* .reg     = */ reg,
+	  /* .context = */ ctx,
+	};
+
+	ctx->metal_dev_ctx = get_metal_dev_context(dev);
+
+        devices.push_back(dev);
       }
       initialized = true;
     }

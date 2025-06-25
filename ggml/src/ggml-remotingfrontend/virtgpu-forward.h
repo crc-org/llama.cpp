@@ -44,3 +44,7 @@ void apir_buffer_free_buffer(struct virtgpu *gpu, apir_buffer_context_t *buffer_
 /* backend */
 
 ggml_status apir_backend_graph_compute(struct virtgpu *gpu, ggml_cgraph *cgraph);
+
+/* metal */
+
+bool apir_metal_get_device_context(struct virtgpu *gpu, struct ggml_backend_metal_device_context *metal_dev_ctx);

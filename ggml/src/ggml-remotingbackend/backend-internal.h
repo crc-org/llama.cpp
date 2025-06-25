@@ -27,3 +27,8 @@ extern "C" {
 				   char *enc_cur, const char *enc_end,
 				   char **enc_cur_after);
 }
+
+extern void (*ggml_backend_metal_get_device_context_fct)(ggml_backend_dev_t dev,
+							 bool *has_simdgroup_mm,
+							 bool *has_simdgroup_reduction,
+							 bool *use_bfloat);
