@@ -6068,3 +6068,16 @@ ggml_backend_reg_t ggml_backend_metal_reg(void) {
 }
 
 GGML_BACKEND_DL_IMPL(ggml_backend_metal_reg)
+
+
+GGML_BACKEND_API void
+ggml_backend_metal_get_device_context(ggml_backend_dev_t dev,
+				      bool *has_simdgroup_mm,
+				      bool *has_simdgroup_reduction,
+				      bool *use_bfloat) {
+  struct ggml_backend_metal_device_context *dev_ctx = dev->context ;
+
+  *use_bfloat = dev_ctx->use_bfloat;
+  *has_simdgroup_reduction = dev_ctx->has_simdgroup_reduction;
+  *has_simdgroup_mm = dev_ctx->has_simdgroup_mm;
+}

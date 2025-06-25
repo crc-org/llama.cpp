@@ -16,8 +16,6 @@ apir_buffer_get_base(struct virtgpu *gpu, apir_buffer_context_t *buffer_context)
 
   REMOTE_CALL_FINISH(gpu, encoder, decoder);
 
-  //INFO("%s: received base %p\n", __func__,  (void *) base);
-
   return (void *) base;
 }
 

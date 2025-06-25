@@ -44,9 +44,24 @@ ggml_backend_remoting_device_get_memory(ggml_backend_dev_t dev, size_t * free, s
 
 static bool
 ggml_backend_remoting_device_supports_op(ggml_backend_dev_t dev, const ggml_tensor * op) {
+#if USE_ALWAYS_TRUE_SUPPORTS_OP == 1
+  /* ggml-rpc cheats it like this */
+  /* with the current implementation of serialize_tensor, the src/view aren't properly passed */
+  UNUSED(dev);
+  UNUSED(op);
+
+  return true;
+#elif USE_METAL_GUEST_SUPPORTS_OP == 1
+  UNUSED(dev);
+
+  struct ggml_backend_remoting_device_context *device_ctx = GET_DEVICE_CONTEXT();
+
+  return ggml_metal_supports_op(device_ctx->metal_dev_ctx, op);
+#else
   struct virtgpu *gpu = DEV_TO_GPU(dev);
 
   return apir_device_supports_op(gpu, op);
+#endif
 }
 
 static bool

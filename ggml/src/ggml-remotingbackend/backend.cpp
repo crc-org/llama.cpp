@@ -14,6 +14,7 @@
 #define GGML_BACKEND_LIBRARY_REG_ENV "APIR_LLAMA_CPP_GGML_LIBRARY_REG"
 #define GGML_BACKEND_LIBRARY_INIT_ENV "APIR_LLAMA_CPP_GGML_LIBRARY_INIT"
 
+#define GGML_BACKEND_LIBRARY_METAL_DEVICE_CONTEXT "ggml_backend_metal_get_device_context"
 
 static void *backend_library_handle = NULL;
 
@@ -86,6 +87,14 @@ extern "C" {
     }
 
     void *ggml_backend_init_fct = dlsym(backend_library_handle, library_init);
+    dlsym_error = dlerror();
+    if (dlsym_error) {
+      ERROR("Cannot load symbol: %s\n", dlsym_error);
+
+      return APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS;
+    }
+
+    ggml_backend_metal_get_device_context_fct = (void (*)(ggml_backend_dev_t, bool *, bool *, bool *)) dlsym(backend_library_handle, GGML_BACKEND_LIBRARY_METAL_DEVICE_CONTEXT);
     dlsym_error = dlerror();
     if (dlsym_error) {
       ERROR("Cannot load symbol: %s\n", dlsym_error);

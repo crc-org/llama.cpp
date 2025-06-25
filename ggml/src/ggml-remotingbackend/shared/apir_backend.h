@@ -9,9 +9,6 @@
 
 #define APIR_BACKEND_FORWARD_INDEX_INVALID 6
 
-// 1 is fast, 0 avoid micro-benchmark crashes
-#define APIR_DEVICE_SUPPORTS_OP_ALWAYS_TRUE 1
-
 // 0 is fast, 1 avoids the backend to crash if an unsupported tensor is received
 #define APIR_BACKEND_CHECK_SUPPORTS_OP 0
 
@@ -57,8 +54,11 @@ typedef enum ApirBackendCommandType {
   /* backend */
   APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 19,
 
+  /* metal */
+  APIR_COMMAND_TYPE_METAL_GET_DEVICE_CONTEXT = 20,
+
   // last command_type index + 1
-  APIR_BACKEND_DISPATCH_TABLE_COUNT = 20,
+  APIR_BACKEND_DISPATCH_TABLE_COUNT = 21,
 } ApirBackendCommandType;
 
 

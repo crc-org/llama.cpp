@@ -8,7 +8,13 @@
 #include "ggml-impl.h"
 #include "ggml-backend-impl.h"
 #include "ggml-backend.h"
+#include "ggml-metal-remoting.h"
 #include "virtgpu.h"
+
+
+// 1 is fast, 0 avoid micro-benchmark crashes
+#define USE_ALWAYS_TRUE_SUPPORTS_OP 0
+#define USE_METAL_GUEST_SUPPORTS_OP 1
 
 #define DEV_TO_GPU(name) \
   ((struct ggml_backend_remoting_device_context *) (name)->context)->gpu
@@ -23,7 +29,7 @@
   ((struct ggml_backend_remoting_buffer_context *) (name)->context)->apir_context.host_handle
 
 #define GET_DEVICE_CONTEXT() \
-  (struct ggml_backend_remoting_device_context *) ggml_backend_remoting_get_device(0)->context \
+  (struct ggml_backend_remoting_device_context *) ggml_backend_remoting_get_device(0)->context
 
 static inline apir_buffer_type_host_handle_t
 ggml_buffer_type_to_apir_handle(ggml_backend_buffer_type_t buft) {
@@ -85,6 +91,8 @@ struct ggml_backend_remoting_device_context {
   std::vector<std::tuple<void*, size_t, struct vn_renderer_shmem *>> shared_memory;
 
   struct virtgpu *gpu;
+
+  const struct ggml_backend_metal_device_context *metal_dev_ctx;
 };
 
 struct ggml_backend_remoting_buffer_context {
