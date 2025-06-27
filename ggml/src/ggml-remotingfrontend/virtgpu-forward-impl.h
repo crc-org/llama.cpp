@@ -19,7 +19,7 @@
 
 #define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name) \
   do {							      \
-    decoder_name = remote_call(gpu_dev_name, encoder_name);   \
+    decoder_name = remote_call(gpu_dev_name, encoder_name, 0);   \
     if (!decoder) {					      \
       FATAL("%s: failed to kick the remote call :/", __func__); \
     }								      \
