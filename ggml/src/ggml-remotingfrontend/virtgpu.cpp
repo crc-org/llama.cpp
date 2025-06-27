@@ -96,9 +96,10 @@ create_virtgpu() {
   if (!encoder) {
     FATAL("%s: failed to prepare the remote call encoder :/", __func__);
   }
-  decoder = remote_call(gpu, encoder);
+  const uint64_t MAX_WAIT_US = 200000; // 2s (some conversions are wrong down the stack)
+  decoder = remote_call(gpu, encoder, MAX_WAIT_US);
   if (!decoder) {
-    FATAL("%s: failed to kick the remote call :/", __func__);
+    FATAL("%s: failed to initialize the API remoting libraries. :/", __func__);
   }
 
   ret = remote_call_finish(encoder, decoder);
@@ -440,7 +441,8 @@ remote_call_finish(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec) {
 struct vn_cs_decoder *
 remote_call(
   struct virtgpu *gpu,
-  struct vn_cs_encoder *encoder
+  struct vn_cs_encoder *encoder,
+  uint64_t max_us
   )
 {
   /*
@@ -480,10 +482,15 @@ remote_call(
    * Wait for the response notification
    */
 
+  uint32_t total_us = 0;
   while (std::atomic_load_explicit(atomic_reply_notif, std::memory_order_acquire) == 0) {
     int64_t base_sleep_us = 15;
 
     os_time_sleep(base_sleep_us);
+    total_us += base_sleep_us;
+    if (max_us && total_us > max_us) {
+      return NULL;
+    }
   }
 
   /*
