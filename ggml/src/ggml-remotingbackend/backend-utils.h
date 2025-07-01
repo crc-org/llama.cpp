@@ -7,47 +7,55 @@
 #include <ggml.h>
 
 #define UNUSED GGML_UNUSED
+#define APIR_LLAMA_CPP_LOG_TO_FILE_ENV "APIR_LLAMA_CPP_LOG_TO_FILE"
+
+static FILE *
+get_log_dest(void)
+{
+   static FILE *dest = NULL;
+   if (dest) {
+      return dest;
+   }
+   const char *apir_log_to_file = getenv(APIR_LLAMA_CPP_LOG_TO_FILE_ENV);
+   if (!apir_log_to_file) {
+      dest = stderr;
+      return dest;
+   }
+
+   dest = fopen(apir_log_to_file, "w");
+
+   return dest;
+}
+
+#define APIR_VA_PRINT(prefix, format)               \
+   do {                                             \
+      FILE *dest = get_log_dest();                  \
+      fprintf(dest, prefix);                        \
+      va_list argptr;                               \
+      va_start(argptr, format);                     \
+      vfprintf(dest, format, argptr);               \
+      fprintf(dest, "\n");                          \
+      va_end(argptr);                               \
+      fflush(dest);                                 \
+   } while (0)
 
 inline void
 INFO(const char *format, ...) {
-  va_list argptr;
-  va_start(argptr, format);
-  vfprintf(stderr, format, argptr);
-  fprintf(stderr, "\n");
-  va_end(argptr);
+  APIR_VA_PRINT("INFO: ", format);
 }
 
 inline void
 WARNING(const char *format, ...) {
-  fprintf(stderr, "WARNING: ");
-
-  va_list argptr;
-  va_start(argptr, format);
-  vfprintf(stderr, format, argptr);
-  fprintf(stderr, "\n");
-  va_end(argptr);
+  APIR_VA_PRINT("WARNING: ", format);
 }
 
 inline void
 ERROR(const char *format, ...) {
-  fprintf(stderr, "ERROR: ");
-
-  va_list argptr;
-  va_start(argptr, format);
-  vfprintf(stderr, format, argptr);
-  fprintf(stderr, "\n");
-  va_end(argptr);
+  APIR_VA_PRINT("ERROR: ", format);
 }
 
-inline void
+[[noreturn]] inline void
 FATAL(const char *format, ...) {
-  fprintf(stderr, "FATAL: ");
-
-  va_list argptr;
-  va_start(argptr, format);
-  vfprintf(stderr, format, argptr);
-  fprintf(stderr, "\n");
-  va_end(argptr);
-  if (format)
-    assert(false);
+  APIR_VA_PRINT("FORMAT: ", format);
+  abort();
 }

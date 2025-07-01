@@ -82,10 +82,12 @@ create_virtgpu() {
 
   if (!gpu->reply_shmem) {
     FATAL("%s: failed to create the shared reply memory pages :/", __func__);
+    return NULL;
   }
 
   if (!gpu->data_shmem) {
     FATAL("%s: failed to create the shared data memory pages :/", __func__);
+    return NULL;
   }
 
   struct vn_cs_encoder *encoder;
@@ -100,11 +102,14 @@ create_virtgpu() {
   decoder = remote_call(gpu, encoder, MAX_WAIT_US);
   if (!decoder) {
     FATAL("%s: failed to initialize the API remoting libraries. :/", __func__);
+    return NULL;
   }
 
   ret = remote_call_finish(encoder, decoder);
   if (ret != 0) {
-    FATAL("%s: failed to load the APIR backend libraries (code=%d):/", __func__, ret);
+    FATAL("%s: failed to load the APIR backend libraries (code=%d | %s):/",
+	  __func__, ret, apir_backend_initialize_error(ret));
+    return NULL;
   }
 
   return gpu;
