@@ -6,6 +6,7 @@
 #define APIR_BACKEND_INITIALIZE_MISSING_BACKEND_SYMBOLS 3
 #define APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS 4
 #define APIR_BACKEND_INITIALIZE_BACKEND_FAILED 5
+// new entries here need to be added to the apir_backend_initialize_error function below
 
 #define APIR_BACKEND_FORWARD_INDEX_INVALID 6
 
@@ -105,4 +106,22 @@ static inline void show_timer(struct timer_data *timer) {
 
   INFO("%14s [%9.0f] ms for %4ld invocations | ITL %2.2f ms | throughput = %4.2f t/s",
        timer->name, ms, timer->count, itl, speed);
+}
+
+static const char *apir_backend_initialize_error(int code) {
+#define APIR_BACKEND_INITIALIZE_ERROR(code_name) \
+  do {						 \
+    if (code == code_name) return #code_name;	 \
+  } while (0)					 \
+
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_SUCCESSS);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_CANNOT_OPEN_BACKEND_LIBRARY);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_MISSING_BACKEND_SYMBOLS);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_BACKEND_FAILED);
+
+  return "Unknown APIR_BACKEND_INITIALIZE error:/"
+
+#undef APIR_BACKEND_INITIALIZE_ERROR
 }
