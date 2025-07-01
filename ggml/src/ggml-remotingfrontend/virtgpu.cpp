@@ -107,7 +107,8 @@ create_virtgpu() {
 
   ret = remote_call_finish(encoder, decoder);
   if (ret != 0) {
-    FATAL("%s: failed to load the APIR backend libraries (code=%d):/", __func__, ret);
+    FATAL("%s: failed to load the APIR backend libraries (code=%d | %s):/",
+	  __func__, ret, apir_backend_initialize_error(ret));
     return NULL;
   }
 
