@@ -14,6 +14,7 @@ void (*ggml_backend_metal_get_device_context_fct)(ggml_backend_dev_t dev,
 uint32_t
 backend_metal_get_device_context(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
   UNUSED(ctx);
+  UNUSED(dec);
 
   bool has_simdgroup_mm;
   bool has_simdgroup_reduction;
