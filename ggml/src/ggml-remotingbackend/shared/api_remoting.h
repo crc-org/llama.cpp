@@ -1,6 +1,5 @@
-#define VIRGL_APIR_COMMAND_TYPE_LoadLibrary 255
-#define VIRGL_APIR_COMMAND_TYPE_Forward 256
-
+#define VIRGL_APIR_COMMAND_TYPE_LoadLibrary 331
+#define VIRGL_APIR_COMMAND_TYPE_Forward 332
 
 static inline const char *api_remoting_command_name(int32_t type)
 {
