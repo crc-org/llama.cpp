@@ -98,7 +98,7 @@ create_virtgpu() {
   if (!encoder) {
     FATAL("%s: failed to prepare the remote call encoder :/", __func__);
   }
-  const uint64_t MAX_WAIT_US = 200000; // 2s (some conversions are wrong down the stack)
+  const uint64_t MAX_WAIT_US = 500000; // 5s (some conversions are wrong down the stack)
   decoder = remote_call(gpu, encoder, MAX_WAIT_US);
   if (!decoder) {
     FATAL("%s: failed to initialize the API remoting libraries. :/", __func__);
@@ -494,6 +494,7 @@ remote_call(
     os_time_sleep(base_sleep_us);
     total_us += base_sleep_us;
     if (max_us && total_us > max_us) {
+      WARNING("%s: timed out waiting for the API remoting answer...", __func__);
       return NULL;
     }
   }
