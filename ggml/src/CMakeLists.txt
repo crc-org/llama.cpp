@@ -354,6 +354,8 @@ ggml_add_backend(MUSA)
 ggml_add_backend(RPC)
 ggml_add_backend(SYCL)
 ggml_add_backend(Vulkan)
+ggml_add_backend(RemotingFrontend)
+ggml_add_backend(RemotingBackend)
 ggml_add_backend(OpenCL)
 
 foreach (target ggml-base ggml)

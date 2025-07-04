@@ -61,6 +61,11 @@ GGML_BACKEND_API void ggml_backend_metal_capture_next_compute(ggml_backend_t bac
 
 GGML_BACKEND_API ggml_backend_reg_t ggml_backend_metal_reg(void);
 
+GGML_BACKEND_API void ggml_backend_metal_get_device_context(ggml_backend_dev_t dev,
+							    bool *has_simdgroup_mm,
+							    bool *has_simdgroup_reduction,
+							    bool *use_bfloat);
+
 #ifdef __cplusplus
 }
 #endif
