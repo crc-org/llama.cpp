@@ -113,5 +113,5 @@ struct vn_cs_encoder *remote_call_prepare(
   struct virtgpu *gpu,
   int32_t cmd_type,
   int32_t cmd_flags);
-struct vn_cs_decoder *remote_call(struct virtgpu *gpu, struct vn_cs_encoder *enc, uint64_t max_ns);
+struct vn_cs_decoder *remote_call(struct virtgpu *gpu, struct vn_cs_encoder *enc, float max_wait_ms);
 int32_t remote_call_finish(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec);

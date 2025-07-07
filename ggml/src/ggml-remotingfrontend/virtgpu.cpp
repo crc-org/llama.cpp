@@ -98,8 +98,10 @@ create_virtgpu() {
   if (!encoder) {
     FATAL("%s: failed to prepare the remote call encoder :/", __func__);
   }
-  const uint64_t MAX_WAIT_US = 500000; // 5s (some conversions are wrong down the stack)
-  decoder = remote_call(gpu, encoder, MAX_WAIT_US);
+
+  const uint64_t MAX_WAIT_MS = 3000;
+  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
+
   if (!decoder) {
     FATAL("%s: failed to initialize the API remoting libraries. :/", __func__);
     return NULL;
@@ -447,7 +449,7 @@ struct vn_cs_decoder *
 remote_call(
   struct virtgpu *gpu,
   struct vn_cs_encoder *encoder,
-  uint64_t max_us
+  float max_wait_ms
   )
 {
   /*
@@ -483,18 +485,51 @@ remote_call(
   if (ret != 0) {
     FATAL("%s: the virtgpu EXECBUFFER ioctl failed (%d) :/ \n", ret);
   }
+
   /*
    * Wait for the response notification
    */
 
-  uint32_t total_us = 0;
+  start_timer(&wait_host_reply_timer);
+
+  struct timespec ts_start, ts_end;
+  clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  long long start_time = (long long)ts_start.tv_sec * 1000000000LL + ts_start.tv_nsec;
+
+  bool timeout = false;
   while (std::atomic_load_explicit(atomic_reply_notif, std::memory_order_acquire) == 0) {
     int64_t base_sleep_us = 15;
 
     os_time_sleep(base_sleep_us);
-    total_us += base_sleep_us;
-    if (max_us && total_us > max_us) {
-      WARNING("%s: timed out waiting for the API remoting answer...", __func__);
+
+    if (max_wait_ms) {
+      clock_gettime(CLOCK_MONOTONIC, &ts_end);
+      long long end_time = (long long)ts_end.tv_sec * 1000000000LL + ts_end.tv_nsec;
+      float duration_ms = (end_time - start_time) / 1000000;
+
+      if (duration_ms > max_wait_ms) {
+        timeout = true;
+        break;
+      }
+    }
+  }
+
+  long long duration_ns = stop_timer(&wait_host_reply_timer);
+
+  if (max_wait_ms) {
+    double duration_ms = (double) duration_ns / 1e6;  // 1 millisecond = 1e6 nanoseconds
+    double duration_s  = (double) duration_ns / 1e9;  // 1 second = 1e9 nanoseconds
+
+    if (duration_s > 1) {
+      INFO("%s: waited %.2fs for the host reply...", __func__, duration_s);
+    } else if (duration_ms > 1) {
+      INFO("%s: waited %.2fms for the host reply...", __func__, duration_ms);
+    } else {
+      INFO("%s: waited %lldns for the host reply...", __func__, duration_ns);
+    }
+
+    if (timeout) {
+      ERROR("timeout waiting for the host answer...");
       return NULL;
     }
   }
