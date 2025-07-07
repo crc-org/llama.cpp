@@ -126,7 +126,7 @@ virtgpu_open(struct virtgpu *gpu)
    drmDevicePtr devs[8];
    int count = drmGetDevices2(0, devs, ARRAY_SIZE(devs));
    if (count < 0) {
-     INFO("failed to enumerate DRM devices");
+     ERROR("failed to enumerate DRM devices");
      return APIR_ERROR_INITIALIZATION_FAILED;
    }
 
