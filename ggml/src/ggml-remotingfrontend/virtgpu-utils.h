@@ -48,6 +48,17 @@ INFO(...) {}
 #endif
 
 inline void
+MESSAGE(const char *format, ...) {
+  fprintf(stderr, "APIR: ");
+
+  va_list argptr;
+  va_start(argptr, format);
+  vfprintf(stderr, format, argptr);
+  fprintf(stderr, "\n");
+  va_end(argptr);
+}
+
+inline void
 WARNING(const char *format, ...) {
   fprintf(stderr, "WARNING: ");
 

@@ -148,12 +148,12 @@ ggml_backend_reg_t ggml_backend_remoting_frontend_reg() {
   }
   initialized = true;
 
-  INFO("ggml_backend_remoting_frontend_reg() hello :wave:");
-
   ggml_backend_remoting_reg_init_devices(&reg);
 
   int cr = atexit(showTime);
   GGML_ASSERT(cr == 0);
+
+  MESSAGE("%s: initialzed", __func__);
 
   return &reg;
 }

@@ -223,7 +223,7 @@ virtgpu_open_device(struct virtgpu *gpu, const drmDevicePtr dev)
 
    drmFreeVersion(version);
 
-   INFO("using DRM device %s", node_path);
+   MESSAGE("using DRM device %s", node_path);
 
    return APIR_SUCCESS;
 }
@@ -523,11 +523,11 @@ remote_call(
     double duration_s  = (double) duration_ns / 1e9;  // 1 second = 1e9 nanoseconds
 
     if (duration_s > 1) {
-      INFO("%s: waited %.2fs for the host reply...", __func__, duration_s);
+      MESSAGE("%s: waited %.2fs for the host reply...", __func__, duration_s);
     } else if (duration_ms > 1) {
-      INFO("%s: waited %.2fms for the host reply...", __func__, duration_ms);
+      MESSAGE("%s: waited %.2fms for the host reply...", __func__, duration_ms);
     } else {
-      INFO("%s: waited %lldns for the host reply...", __func__, duration_ns);
+      MESSAGE("%s: waited %lldns for the host reply...", __func__, duration_ns);
     }
 
     if (timeout) {
