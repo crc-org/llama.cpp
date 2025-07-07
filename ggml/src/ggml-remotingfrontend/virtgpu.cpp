@@ -62,7 +62,10 @@ create_virtgpu() {
 			 1024);
 
   virt_gpu_result_t result = virtgpu_open(gpu);
-  assert(result == APIR_SUCCESS);
+  if (result != APIR_SUCCESS) {
+    FATAL("%s: failed to create the open the virtgpu device :/", __func__);
+    return NULL;
+  }
 
   result = virtgpu_init_params(gpu);
   assert(result == APIR_SUCCESS);
@@ -126,7 +129,7 @@ virtgpu_open(struct virtgpu *gpu)
    drmDevicePtr devs[8];
    int count = drmGetDevices2(0, devs, ARRAY_SIZE(devs));
    if (count < 0) {
-     ERROR("failed to enumerate DRM devices");
+     ERROR("%s: failed to enumerate DRM devices", __func__);
      return APIR_ERROR_INITIALIZATION_FAILED;
    }
 
