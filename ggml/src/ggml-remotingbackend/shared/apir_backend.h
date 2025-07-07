@@ -83,6 +83,9 @@ struct timer_data {
 extern struct timer_data graph_compute_timer;
 extern struct timer_data get_tensor_timer;
 extern struct timer_data set_tensor_timer;
+extern struct timer_data wait_host_reply_timer;
+extern struct timer_data get_tensor_from_ptr_timer;
+extern struct timer_data set_tensor_from_ptr_timer;
 
 static inline void start_timer(struct timer_data *timer) {
   struct timespec ts;
@@ -108,8 +111,8 @@ static inline void show_timer(struct timer_data *timer) {
   double itl = ms/timer->count;
   double speed = 1/itl * 1000;
 
-  INFO("%14s [%9.0f] ms for %4ld invocations | ITL %2.2f ms | throughput = %4.2f t/s",
-       timer->name, ms, timer->count, itl, speed);
+  INFO("%15s [%9.0f] ms for %4ld invocations | ITL %2.2f ms | throughput = %4.2f t/s (%4.2f ms/call)",
+       timer->name, ms, timer->count, itl, speed, ms/timer->count);
 }
 
 static const char *apir_backend_initialize_error(int code) {

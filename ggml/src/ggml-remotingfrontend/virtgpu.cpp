@@ -26,6 +26,8 @@ virtgpu_ioctl_get_caps(struct virtgpu *gpu,
 static uint64_t virtgpu_ioctl_getparam(struct virtgpu *gpu, uint64_t param);
 static void virtgpu_init_renderer_info(struct virtgpu *gpu);
 
+struct timer_data wait_host_reply_timer = {0, 0, 0, "wait_host_reply"};
+
 static inline void
 virtgpu_init_shmem_blob_mem(struct virtgpu *gpu)
 {
