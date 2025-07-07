@@ -18,6 +18,20 @@ set -x
 if [[ "${BENCH_MODE:-}" == "bench" ]]; then
     cat <<EOF
 ###
+### Running llama-server
+###
+
+EOF
+    $prefix \
+        $LLAMA_BUILD_DIR/bin/llama-server \
+        --host 0.0.0.0 \
+        --port 8080 \
+        --model "$MODEL_HOME/$MODEL" \
+        --n-gpu-layers 99 \
+        --threads 1
+elif [[ "${BENCH_MODE:-}" == "bench" ]]; then
+    cat <<EOF
+###
 ### Running llama-bench
 ###
 
