@@ -90,13 +90,17 @@ static inline void start_timer(struct timer_data *timer) {
   timer->start = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static inline void stop_timer(struct timer_data *timer) {
+// returns the duration in ns
+static inline long long stop_timer(struct timer_data *timer) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
   long long timer_end = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 
-  timer->total += (timer_end - timer->start);
+  long long duration = (timer_end - timer->start);
+  timer->total += duration;
   timer->count += 1;
+
+  return duration;
 }
 
 static inline void show_timer(struct timer_data *timer) {
