@@ -121,6 +121,12 @@ static void showTime() {
   show_timer(&graph_compute_timer);
   show_timer(&get_tensor_timer);
   show_timer(&set_tensor_timer);
+  show_timer(&wait_host_reply_timer);
+
+  if (get_tensor_from_ptr_timer.count) {
+    show_timer(&get_tensor_from_ptr_timer);
+    show_timer(&set_tensor_from_ptr_timer);
+  }
 }
 
 ggml_backend_reg_t ggml_backend_remoting_frontend_reg() {

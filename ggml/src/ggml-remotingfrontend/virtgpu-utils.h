@@ -34,6 +34,8 @@ void breakpoint();
 #ifndef NDEBUG
 inline void
 INFO(const char *format, ...) {
+  fprintf(stderr, "INFO: ");
+
   va_list argptr;
   va_start(argptr, format);
   vfprintf(stderr, format, argptr);
@@ -48,6 +50,17 @@ INFO(...) {}
 inline void
 WARNING(const char *format, ...) {
   fprintf(stderr, "WARNING: ");
+
+  va_list argptr;
+  va_start(argptr, format);
+  vfprintf(stderr, format, argptr);
+  fprintf(stderr, "\n");
+  va_end(argptr);
+}
+
+inline void
+ERROR(const char *format, ...) {
+  fprintf(stderr, "ERROR: ");
 
   va_list argptr;
   va_start(argptr, format);
