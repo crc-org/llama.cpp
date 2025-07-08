@@ -54,6 +54,117 @@ virtgpu_init_shmem_blob_mem(struct virtgpu *gpu)
    gpu->shmem_blob_mem = VIRTGPU_BLOB_MEM_HOST3D;
 }
 
+static int
+virtgpu_handshake(struct virtgpu *gpu) {
+  struct vn_cs_encoder *encoder;
+  struct vn_cs_decoder *decoder;
+
+  encoder = remote_call_prepare(gpu,  APIR_COMMAND_TYPE_HandShake, 0);
+  if (!encoder) {
+    FATAL("%s: failed to prepare the remote call encoder :/", __func__);
+    return 1;
+  }
+
+  /* write handshake props */
+
+  uint32_t guest_major = APIR_PROTOCOL_MAJOR;
+  uint32_t guest_minor = APIR_PROTOCOL_MINOR;
+  vn_encode_uint32_t(encoder, &guest_major);
+  vn_encode_uint32_t(encoder, &guest_minor);
+
+  /* *** */
+
+  const uint64_t MAX_WAIT_MS = 1*1000;
+  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
+
+  if (!decoder) {
+    FATAL("%s: failed to initiate the communication with the virglrenderer library. "
+	  "Most likely, the wrong library was loaded.", __func__);
+    return 1;
+  }
+
+  /* read handshake return values */
+
+  uint32_t host_major;
+  uint32_t host_minor;
+  vn_decode_uint32_t(decoder, &host_major);
+  vn_decode_uint32_t(decoder, &host_minor);
+
+  /* *** */
+
+  uint32_t ret_magic;
+  ret_magic = remote_call_finish(encoder, decoder);
+  if (ret_magic != APIR_HANDSHAKE_MAGIC) {
+    FATAL("%s: handshake with the virglrenderer failed (code=%d | %s):/",
+	  __func__, ret_magic, apir_backend_initialize_error(ret_magic));
+    return 1;
+  }
+
+  INFO("%s: Guest is running with %u.%u", __func__, guest_major, guest_minor);
+  INFO("%s: Host is running with %u.%u", __func__, host_major, host_minor);
+
+  if (guest_major != host_major) {
+    ERROR("Host major (%d) and guest major (%d) version differ", host_major, guest_major);
+  } else if (guest_minor != host_minor) {
+    WARNING("Host minor (%d) and guest minor (%d) version differ", host_minor, guest_minor);
+  }
+
+  INFO("Handshake with the host virglrenderer library completed.");
+
+  return 0;
+}
+
+static ApirLoadLibraryReturnCode
+virtgpu_load_library(struct virtgpu *gpu) {
+  struct vn_cs_encoder *encoder;
+  struct vn_cs_decoder *decoder;
+  ApirLoadLibraryReturnCode ret;
+
+  encoder = remote_call_prepare(gpu,  APIR_COMMAND_TYPE_LoadLibrary, 0);
+  if (!encoder) {
+    FATAL("%s: hypercall error: failed to prepare the remote call encoder :/", __func__);
+    return APIR_LOAD_LIBRARY_HYPERCALL_ERROR;
+  }
+
+  const uint64_t MAX_WAIT_MS = 15*1000; // 15s
+  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
+
+  if (!decoder) {
+    FATAL("%s: hypercall error: failed to kick the API remoting hypercall. :/", __func__);
+    return APIR_LOAD_LIBRARY_HYPERCALL_ERROR;
+  }
+
+  ret = (ApirLoadLibraryReturnCode) remote_call_finish(encoder, decoder);
+
+  if (ret == APIR_LOAD_LIBRARY_SUCCESS) {
+    INFO("%s: The API Remoting backend was successfully loaded and initialized", __func__);
+
+    return ret;
+  }
+
+  // something wrong happened, find out what.
+
+  if (ret < APIR_LOAD_LIBRARY_INIT_BASE_INDEX) {
+    FATAL("%s: virglrenderer could not load the API Remoting backend library: %s (code %d)",
+	  __func__, apir_load_library_error(ret), ret);
+    return ret;
+  }
+
+  INFO("%s: virglrenderer successfully loaded the API Remoting backend library", __func__);
+
+  ApirLoadLibraryReturnCode apir_ret = (ApirLoadLibraryReturnCode) (ret - APIR_LOAD_LIBRARY_INIT_BASE_INDEX);
+
+  if (apir_ret < APIR_LOAD_LIBRARY_INIT_BASE_INDEX) {
+    FATAL("%s: the API Remoting backend library couldn't load the backend library: apir code=%d | %s):/",
+	  __func__, apir_ret, apir_load_library_error(apir_ret));
+  } else {
+    uint32_t lib_ret = apir_ret - APIR_LOAD_LIBRARY_INIT_BASE_INDEX;
+    FATAL("%s: the API Remoting backend library initialize its backend library: apir code=%d):/",
+	  __func__, lib_ret);
+  }
+  return ret;
+}
+
 struct virtgpu *
 create_virtgpu() {
   struct virtgpu *gpu = new struct virtgpu();
@@ -95,33 +206,18 @@ create_virtgpu() {
     return NULL;
   }
 
-  struct vn_cs_encoder *encoder;
-  struct vn_cs_decoder *decoder;
-  int32_t ret;
-
-  encoder = remote_call_prepare(gpu,  VIRGL_APIR_COMMAND_TYPE_LoadLibrary, 0);
-  if (!encoder) {
-    FATAL("%s: failed to prepare the remote call encoder :/", __func__);
-  }
-
-  const uint64_t MAX_WAIT_MS = 3000;
-  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
-
-  if (!decoder) {
-    FATAL("%s: failed to initialize the API remoting libraries. :/", __func__);
+  if (virtgpu_handshake(gpu)) {
+    FATAL("%s: failed to handshake with the virglrenderer library :/", __func__);
     return NULL;
   }
 
-  ret = remote_call_finish(encoder, decoder);
-  if (ret != 0) {
-    FATAL("%s: failed to load the APIR backend libraries (code=%d | %s):/",
-	  __func__, ret, apir_backend_initialize_error(ret));
+  if (virtgpu_load_library(gpu) != APIR_LOAD_LIBRARY_SUCCESS) {
+    FATAL("%s: failed to load the backend library :/", __func__);
     return NULL;
   }
 
   return gpu;
 }
-
 
 static virt_gpu_result_t
 virtgpu_open(struct virtgpu *gpu)
@@ -397,7 +493,7 @@ virtgpu_ioctl_getparam(struct virtgpu *gpu, uint64_t param)
 struct vn_cs_encoder *
 remote_call_prepare(
   struct virtgpu *gpu,
-  int32_t cmd_type,
+  ApirCommandType apir_cmd_type,
   int32_t cmd_flags)
 {
 
@@ -425,6 +521,7 @@ remote_call_prepare(
    * - reply res id (uint32_t)
    */
 
+  int32_t cmd_type = VENUS_COMMAND_TYPE_LENGTH + apir_cmd_type;
   vn_encode_int32_t(&enc, &cmd_type);
   vn_encode_int32_t(&enc, &cmd_flags);
 

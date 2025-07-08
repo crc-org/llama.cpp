@@ -7,6 +7,7 @@
 #include "backend-internal.h"
 #include "backend-dispatched.h"
 
+#include "shared/api_remoting.h"
 #include "shared/apir_backend.h"
 #include "shared/venus_cs.h"
 
@@ -26,9 +27,11 @@ extern "C" {
       buffer->iface.free_buffer(buffer);
     }
 
-    size_t free, total;
-    dev->iface.get_memory(dev, &free, &total);
-    WARNING("%s: free memory: %ld MB\n", __func__, (size_t) free/1024/1024);
+    if (dev) {
+      size_t free, total;
+      dev->iface.get_memory(dev, &free, &total);
+      INFO("%s: free memory: %ld MB", __func__, (size_t) free/1024/1024);
+    }
 
     show_timer(&graph_compute_timer);
     show_timer(&set_tensor_timer);
@@ -43,7 +46,7 @@ extern "C" {
     INFO("%s: bye-bye", __func__);
   }
 
-  uint32_t apir_backend_initialize() {
+  ApirLoadLibraryReturnCode apir_backend_initialize() {
     const char* dlsym_error;
 
     const char* library_name = getenv(GGML_BACKEND_LIBRARY_PATH_ENV);
@@ -53,56 +56,61 @@ extern "C" {
     INFO("%s: loading %s (%s|%s)", __func__, library_name, library_reg, library_init);
 
     if (!library_name) {
-      ERROR("Cannot open library: env var '%s' not defined\n", GGML_BACKEND_LIBRARY_PATH_ENV);
+      ERROR("cannot open the GGML library: env var '%s' not defined\n", GGML_BACKEND_LIBRARY_PATH_ENV);
 
-      return APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY;
+      return APIR_LOAD_LIBRARY_ENV_VAR_MISSING;
     }
 
     backend_library_handle = dlopen(library_name, RTLD_LAZY);
 
     if (!backend_library_handle) {
-      ERROR("Cannot open library: %s\n", dlerror());
+      ERROR("cannot open the GGML library: %s", dlerror());
 
-      return APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY;
+      return APIR_LOAD_LIBRARY_CANNOT_OPEN;
     }
 
     if (!library_reg) {
-      ERROR("Cannot register library: env var '%s' not defined\n", GGML_BACKEND_LIBRARY_REG_ENV);
+      ERROR("cannot register the GGML library: env var '%s' not defined", GGML_BACKEND_LIBRARY_REG_ENV);
 
-      return APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY;
+      return APIR_LOAD_LIBRARY_ENV_VAR_MISSING;
     }
 
     void *ggml_backend_reg_fct = dlsym(backend_library_handle, library_reg);
     dlsym_error = dlerror();
     if (dlsym_error) {
-      ERROR("Cannot load symbol: %s\n", dlsym_error);
+      ERROR("cannot find the GGML backend registration symbol '%s' (from %s): %s",
+	    library_reg, GGML_BACKEND_LIBRARY_REG_ENV, dlsym_error);
 
-      return APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS;
+      return APIR_LOAD_LIBRARY_SYMBOL_MISSING;
     }
 
     if (!library_init) {
-      ERROR("Cannot initialize library: env var '%s' not defined\n", library_init);
+      ERROR("cannot initialize the GGML library: env var '%s' not defined", library_init);
 
-      return APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY;
+      return APIR_LOAD_LIBRARY_ENV_VAR_MISSING;
     }
 
     void *ggml_backend_init_fct = dlsym(backend_library_handle, library_init);
     dlsym_error = dlerror();
     if (dlsym_error) {
-      ERROR("Cannot load symbol: %s\n", dlsym_error);
+      ERROR("cannot find the GGML backend init symbol '%s' (from %s): %s",
+	    library_init, GGML_BACKEND_LIBRARY_INIT_ENV, dlsym_error);
 
-      return APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS;
+      return APIR_LOAD_LIBRARY_SYMBOL_MISSING;
     }
 
     ggml_backend_metal_get_device_context_fct = (void (*)(ggml_backend_dev_t, bool *, bool *, bool *)) dlsym(backend_library_handle, GGML_BACKEND_LIBRARY_METAL_DEVICE_CONTEXT);
     dlsym_error = dlerror();
     if (dlsym_error) {
-      ERROR("Cannot load symbol: %s\n", dlsym_error);
+      ERROR("cannot find the GGML device context symbol '%s': %s\n",
+	    GGML_BACKEND_LIBRARY_METAL_DEVICE_CONTEXT, dlsym_error);
 
-      return APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS;
+      return APIR_LOAD_LIBRARY_SYMBOL_MISSING;
     }
 
-    return backend_dispatch_initialize(ggml_backend_reg_fct, ggml_backend_init_fct);
+    uint32_t ret = backend_dispatch_initialize(ggml_backend_reg_fct, ggml_backend_init_fct);
+
+    return (ApirLoadLibraryReturnCode) (APIR_LOAD_LIBRARY_INIT_BASE_INDEX + ret);
   }
 
   uint32_t apir_backend_dispatcher(uint32_t cmd_type, struct virgl_apir_context *ctx,

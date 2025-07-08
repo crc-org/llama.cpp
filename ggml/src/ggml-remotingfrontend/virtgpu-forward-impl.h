@@ -11,8 +11,8 @@
 #define REMOTE_CALL_PREPARE(gpu_dev_name, encoder_name, apir_command_type__)		\
   do {									\
     int32_t forward_flag = (int32_t) apir_command_type__;		\
-    encoder_name = remote_call_prepare(gpu_dev_name, VIRGL_APIR_COMMAND_TYPE_Forward, forward_flag); \
-    if (!encoder) {							\
+    encoder_name = remote_call_prepare(gpu_dev_name, APIR_COMMAND_TYPE_Forward, forward_flag); \
+    if (!encoder_name) {							\
       FATAL("%s: failed to prepare the remote call encoder :/", __func__); \
     }									\
   } while(0)
@@ -20,7 +20,7 @@
 #define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name) \
   do {							      \
     decoder_name = remote_call(gpu_dev_name, encoder_name, 0);   \
-    if (!decoder) {					      \
+    if (!decoder_name) {					      \
       FATAL("%s: failed to kick the remote call :/", __func__); \
     }								      \
   } while(0)
@@ -28,7 +28,7 @@
 #define REMOTE_CALL_FINISH(gpu_dev_name, encoder_name, decoder_name)	\
   do {									\
     int32_t ret = remote_call_finish(encoder_name, decoder_name);	\
-    if (ret != 0) {							\
+    if (ret < APIR_FORWARD_BASE_INDEX) {			\
       FATAL("%s: failed to forward the API call (code=%d):/", __func__, ret); \
     }									\
   } while(0)
