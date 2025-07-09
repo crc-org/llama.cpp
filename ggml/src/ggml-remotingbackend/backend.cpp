@@ -130,8 +130,8 @@ extern "C" {
     struct vn_cs_decoder *dec = &_dec;
 
 
-    if (cmd_type > APIR_BACKEND_DISPATCH_TABLE_COUNT) {
-      ERROR("Received an invalid dispatch index (%d > %d)\n",
+    if (cmd_type >= APIR_BACKEND_DISPATCH_TABLE_COUNT) {
+      ERROR("Received an invalid dispatch index (%d >= %d)\n",
 	    cmd_type, APIR_BACKEND_DISPATCH_TABLE_COUNT);
       return APIR_BACKEND_FORWARD_INDEX_INVALID;
     }

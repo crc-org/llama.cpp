@@ -4,17 +4,18 @@ void *
 apir_buffer_get_base(struct virtgpu *gpu, apir_buffer_context_t *buffer_context) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_GET_BASE);
 
   vn_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   uintptr_t base;
   vn_decode_uintptr_t(decoder, &base);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return (void *) base;
 }
@@ -24,6 +25,7 @@ apir_buffer_set_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_contex
 		       ggml_tensor *tensor, const void *data, size_t offset, size_t size) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
 #if 0
   INFO("Calling (%p)->set_tensor(tensor=%p, data=%p, offset=%lu, size=%lu",
@@ -51,9 +53,9 @@ apir_buffer_set_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_contex
   vn_encode_size_t(encoder, &offset);
   vn_encode_size_t(encoder, &size);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   if (shmem != gpu->data_shmem) {
     virtgpu_shmem_destroy(gpu, shmem->shmem);
@@ -78,6 +80,7 @@ apir_buffer_get_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_contex
 		       const ggml_tensor *tensor, void *data, size_t offset, size_t size) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_GET_TENSOR);
 
@@ -99,11 +102,11 @@ apir_buffer_get_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_contex
   vn_encode_size_t(encoder, &offset);
   vn_encode_size_t(encoder, &size);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   memcpy(data, shmem->mmap_ptr, size);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   if (shmem != gpu->data_shmem) {
     virtgpu_shmem_destroy(gpu, shmem->shmem);
@@ -116,15 +119,16 @@ apir_buffer_clear(struct virtgpu *gpu, apir_buffer_context_t *buffer_context,
 		  uint8_t value) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_CLEAR);
 
   vn_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
   vn_encode_uint8_t(encoder, &value);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 }
 
 
@@ -132,12 +136,13 @@ void
 apir_buffer_free_buffer(struct virtgpu *gpu, apir_buffer_context_t *buffer_context) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER);
 
   vn_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 }

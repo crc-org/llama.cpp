@@ -10,6 +10,7 @@ ggml_status
 apir_backend_graph_compute(struct virtgpu *gpu, ggml_cgraph *cgraph) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE);
 
@@ -37,13 +38,13 @@ apir_backend_graph_compute(struct virtgpu *gpu, ggml_cgraph *cgraph) {
 
   vn_encode_cgraph_data(&secondary_enc, cgraph_data);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   ggml_status status = GGML_STATUS_ABORTED;
   vn_decode_ggml_status(decoder, &status);
   //INFO("Received status %u", status);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   if (shmem != gpu->data_shmem) {
     virtgpu_shmem_destroy(gpu, shmem->shmem);

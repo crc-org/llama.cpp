@@ -22,12 +22,12 @@
 
 // must match https://gitlab.freedesktop.org/kpouget/virglrenderer/-/blob/main/src/virglrenderer_hw.h?ref_type=heads
 enum virgl_renderer_capset {
-   VIRGL_RENDERER_CAPSET_VIRGL                   = 1,
-   VIRGL_RENDERER_CAPSET_VIRGL2                  = 2,
-   /* 3 is reserved for gfxstream */
-   VIRGL_RENDERER_CAPSET_VENUS                   = 4,
-   /* 5 is reserved for cross-domain */
-   VIRGL_RENDERER_CAPSET_DRM                     = 6,
+  VIRGL_RENDERER_CAPSET_VIRGL                   = 1,
+  VIRGL_RENDERER_CAPSET_VIRGL2                  = 2,
+  /* 3 is reserved for gfxstream */
+  VIRGL_RENDERER_CAPSET_VENUS                   = 4,
+  /* 5 is reserved for cross-domain */
+  VIRGL_RENDERER_CAPSET_DRM                     = 6,
 };
 
 /* from src/virtio/vulkan/vn_renderer_virtgpu.c */
@@ -41,8 +41,8 @@ enum virgl_renderer_capset {
 #define VN_DEBUG(what) true
 
 typedef enum virt_gpu_result_t {
-    APIR_SUCCESS = 0,
-    APIR_ERROR_INITIALIZATION_FAILED = -1,
+  APIR_SUCCESS = 0,
+  APIR_ERROR_INITIALIZATION_FAILED = -1,
 } virt_gpu_result_t;
 
 
@@ -54,48 +54,45 @@ struct remoting_dev_instance {
 
 inline void
 vn_log(struct remoting_dev_instance *instance, const char *format, ...)
-   PRINTFLIKE(2, 3);
+  PRINTFLIKE(2, 3);
 
 
 struct virtgpu {
-   struct remoting_dev_instance *instance;
+  struct remoting_dev_instance *instance;
 
-   int fd;
+  int fd;
 
-   bool has_primary;
-   int primary_major;
-   int primary_minor;
-   int render_major;
-   int render_minor;
+  bool has_primary;
+  int primary_major;
+  int primary_minor;
+  int render_major;
+  int render_minor;
 
-   int bustype;
-   drmPciBusInfo pci_bus_info;
+  int bustype;
+  drmPciBusInfo pci_bus_info;
 
-   uint32_t max_timeline_count;
+  uint32_t max_timeline_count;
 
-   struct {
-      enum virgl_renderer_capset id;
-      uint32_t version;
-      struct virgl_renderer_capset_venus data;
-   } capset;
+  struct {
+    enum virgl_renderer_capset id;
+    uint32_t version;
+    struct virgl_renderer_capset_venus data;
+  } capset;
 
-   uint32_t shmem_blob_mem;
-   uint32_t bo_blob_mem;
+  uint32_t shmem_blob_mem;
+  uint32_t bo_blob_mem;
 
-   /* note that we use gem_handle instead of res_id to index because
-    * res_id is monotonically increasing by default (see
-    * virtio_gpu_resource_id_get)
-    */
+  /* note that we use gem_handle instead of res_id to index because
+   * res_id is monotonically increasing by default (see
+   * virtio_gpu_resource_id_get)
+   */
   struct util_sparse_array shmem_array;
-  // struct util_sparse_array bo_array;
 
-   mtx_t dma_buf_import_mutex;
+  mtx_t dma_buf_import_mutex;
 
-  //   struct virtgpu_shmem_cache shmem_cache;
+  bool supports_cross_device;
 
-   bool supports_cross_device;
-
-  /* KP */
+  /* APIR */
   struct vn_renderer_shmem *reply_shmem;
   struct vn_renderer_shmem *data_shmem;
 };
@@ -104,7 +101,7 @@ struct virtgpu {
 static inline int
 virtgpu_ioctl(struct virtgpu *gpu, unsigned long request, void *args)
 {
-   return drmIoctl(gpu->fd, request, args);
+  return drmIoctl(gpu->fd, request, args);
 }
 
 struct virtgpu *create_virtgpu();
@@ -113,5 +110,16 @@ struct vn_cs_encoder *remote_call_prepare(
   struct virtgpu *gpu,
   ApirCommandType apir_cmd_type,
   int32_t cmd_flags);
-struct vn_cs_decoder *remote_call(struct virtgpu *gpu, struct vn_cs_encoder *enc, float max_wait_ms);
-int32_t remote_call_finish(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec);
+
+uint32_t remote_call(
+  struct virtgpu *gpu,
+  struct vn_cs_encoder *enc,
+  struct vn_cs_decoder **dec,
+  float max_wait_ms,
+  long long *call_duration_ns
+);
+
+void remote_call_finish(
+  struct virtgpu *gpu,
+  struct vn_cs_encoder *enc,
+  struct vn_cs_decoder *dec);

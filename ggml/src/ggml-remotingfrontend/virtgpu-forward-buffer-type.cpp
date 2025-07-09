@@ -4,12 +4,13 @@ const char *
 apir_buffer_type_get_name(struct virtgpu *gpu, ggml_backend_buffer_type_t buft) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_GET_NAME);
 
   vn_encode_ggml_buffer_type(encoder, buft);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   const size_t string_size = vn_decode_array_size_unchecked(decoder);
   char *string = (char *) vn_cs_decoder_alloc_array(decoder, sizeof(char), string_size);
@@ -22,7 +23,7 @@ apir_buffer_type_get_name(struct virtgpu *gpu, ggml_backend_buffer_type_t buft) 
 
   /* *** */
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return string;
 }
@@ -31,19 +32,20 @@ size_t
 apir_buffer_type_get_alignment(struct virtgpu *gpu, ggml_backend_buffer_type_t buft) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_GET_ALIGNMENT);
 
   vn_encode_ggml_buffer_type(encoder, buft);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   size_t alignment;
   vn_decode_size_t(decoder, &alignment);
 
   INFO("%s: Forward BUFT ALIGNMENT --> %zu ", __func__, alignment);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return alignment;
 }
@@ -52,19 +54,20 @@ size_t
 apir_buffer_type_get_max_size(struct virtgpu *gpu, ggml_backend_buffer_type_t buft) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_GET_MAX_SIZE);
 
   vn_encode_ggml_buffer_type(encoder, buft);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   size_t max_size;
   vn_decode_size_t(decoder, &max_size);
 
   INFO("%s: Forward BUFT MAX SIZE --> %zu ", __func__, max_size);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return max_size;
 }
@@ -73,19 +76,20 @@ bool
 apir_buffer_type_is_host(struct virtgpu *gpu, ggml_backend_buffer_type_t buft) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_IS_HOST);
 
   vn_encode_ggml_buffer_type(encoder, buft);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   bool is_host;
   vn_decode_bool_t(decoder, &is_host);
 
   INFO("%s: buffer is host? %d", __func__, is_host);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return is_host;
 }
@@ -94,6 +98,7 @@ apir_buffer_context_t
 apir_buffer_type_alloc_buffer(struct virtgpu *gpu, ggml_backend_buffer_type_t buft, size_t size) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   apir_buffer_context_t buffer_context;
   INFO("%s: allocate device memory (%lu)", __func__,  size);
@@ -104,11 +109,11 @@ apir_buffer_type_alloc_buffer(struct virtgpu *gpu, ggml_backend_buffer_type_t bu
 
   vn_encode_size_t(encoder, &size);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_apir_buffer_host_handle_t(decoder, &buffer_context.host_handle);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return buffer_context;
 }

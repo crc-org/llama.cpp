@@ -117,7 +117,6 @@ ggml_backend_dev_t ggml_backend_remoting_get_device(size_t device);
 ggml_backend_buffer_type_t ggml_backend_remoting_host_buffer_type();
 ggml_backend_t ggml_backend_remoting_device_init(ggml_backend_dev_t dev, const char * params);
 ggml_backend_buffer_type_t ggml_backend_remoting_device_get_buffer_type(ggml_backend_dev_t dev);
-ggml_backend_t ggml_backend_remoting_device_init(ggml_backend_dev_t dev, const char * params);
 
 struct remoting_buffer_struct;
 typedef std::shared_ptr<remoting_buffer_struct> remoting_buffer;
