@@ -41,7 +41,7 @@ uint32_t backend_dispatch_initialize(void *ggml_backend_reg_fct_p, void *ggml_ba
 
   size_t free, total;
   dev->iface.get_memory(dev, &free, &total);
-  WARNING("%s: free memory: %ld MB\n", __func__, (size_t) free/1024/1024);
+  INFO("%s: free memory: %ld MB", __func__, (size_t) free/1024/1024);
 
-  return APIR_BACKEND_INITIALIZE_SUCCESSS;
+  return APIR_BACKEND_INITIALIZE_SUCCESS;
 }
