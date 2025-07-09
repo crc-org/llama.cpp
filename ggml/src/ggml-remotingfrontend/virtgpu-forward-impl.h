@@ -17,18 +17,15 @@
     }									\
   } while(0)
 
-#define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name) \
-  do {							      \
-    decoder_name = remote_call(gpu_dev_name, encoder_name, 0);   \
-    if (!decoder_name) {					      \
-      FATAL("%s: failed to kick the remote call :/", __func__); \
-    }								      \
-  } while(0)
 
-#define REMOTE_CALL_FINISH(gpu_dev_name, encoder_name, decoder_name)	\
+#define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name, ret_name) \
   do {									\
-    int32_t ret = remote_call_finish(encoder_name, decoder_name);	\
-    if (ret < APIR_FORWARD_BASE_INDEX) {			\
-      FATAL("%s: failed to forward the API call (code=%d):/", __func__, ret); \
+    ret_name = (ApirForwardReturnCode) remote_call(gpu_dev_name, encoder_name, &decoder_name, 0, NULL); \
+    if (!decoder_name) {						\
+      FATAL("%s: failed to kick the remote call :/", __func__);		\
     }									\
+    if (ret_name < APIR_FORWARD_BASE_INDEX) {				\
+      FATAL("%s: failed to forward the API call: %s: code %d", __func__, apir_forward_error(ret_name), ret_name); \
+    }									\
+    ret_name = (ApirForwardReturnCode) (ret_name - APIR_FORWARD_BASE_INDEX); \
   } while(0)

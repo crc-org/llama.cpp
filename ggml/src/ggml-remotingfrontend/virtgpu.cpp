@@ -28,6 +28,11 @@ static void virtgpu_init_renderer_info(struct virtgpu *gpu);
 
 struct timer_data wait_host_reply_timer = {0, 0, 0, "wait_host_reply"};
 
+static void log_call_duration(long long call_duration_ns, const char *name);
+
+const uint64_t APIR_HANDSHAKE_MAX_WAIT_MS = 15*1000; // 15s
+const uint64_t APIR_LOADLIBRARY_MAX_WAIT_MS = 60*1000; // 60s
+
 static inline void
 virtgpu_init_shmem_blob_mem(struct virtgpu *gpu)
 {
@@ -74,12 +79,15 @@ virtgpu_handshake(struct virtgpu *gpu) {
 
   /* *** */
 
-  const uint64_t MAX_WAIT_MS = 1*1000;
-  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
+
+  uint32_t ret_magic;
+  long long call_duration_ns;
+  ret_magic = remote_call(gpu, encoder, &decoder, APIR_HANDSHAKE_MAX_WAIT_MS, &call_duration_ns);
+  log_call_duration(call_duration_ns, "API Remoting LoadLibrary");
 
   if (!decoder) {
     FATAL("%s: failed to initiate the communication with the virglrenderer library. "
-	  "Most likely, the wrong library was loaded.", __func__);
+	  "Most likely, the wrong virglrenderer library was loaded in the hypervisor.", __func__);
     return 1;
   }
 
@@ -87,18 +95,24 @@ virtgpu_handshake(struct virtgpu *gpu) {
 
   uint32_t host_major;
   uint32_t host_minor;
-  vn_decode_uint32_t(decoder, &host_major);
-  vn_decode_uint32_t(decoder, &host_minor);
 
-  /* *** */
-
-  uint32_t ret_magic;
-  ret_magic = remote_call_finish(encoder, decoder);
   if (ret_magic != APIR_HANDSHAKE_MAGIC) {
     FATAL("%s: handshake with the virglrenderer failed (code=%d | %s):/",
 	  __func__, ret_magic, apir_backend_initialize_error(ret_magic));
+  } else {
+    vn_decode_uint32_t(decoder, &host_major);
+    vn_decode_uint32_t(decoder, &host_minor);
+  }
+
+  /* *** */
+
+  remote_call_finish(gpu, encoder, decoder);
+
+  if (ret_magic != APIR_HANDSHAKE_MAGIC) {
     return 1;
   }
+
+  /* *** */
 
   INFO("%s: Guest is running with %u.%u", __func__, guest_major, guest_minor);
   INFO("%s: Host is running with %u.%u", __func__, host_major, host_minor);
@@ -123,18 +137,21 @@ virtgpu_load_library(struct virtgpu *gpu) {
   encoder = remote_call_prepare(gpu,  APIR_COMMAND_TYPE_LoadLibrary, 0);
   if (!encoder) {
     FATAL("%s: hypercall error: failed to prepare the remote call encoder :/", __func__);
-    return APIR_LOAD_LIBRARY_HYPERCALL_ERROR;
+    return APIR_LOAD_LIBRARY_HYPERCALL_INITIALIZATION_ERROR;
   }
 
-  const uint64_t MAX_WAIT_MS = 15*1000; // 15s
-  decoder = remote_call(gpu, encoder, MAX_WAIT_MS);
+  long long call_duration_ns;
+
+  ret = (ApirLoadLibraryReturnCode) remote_call(gpu, encoder, &decoder,
+                                                APIR_LOADLIBRARY_MAX_WAIT_MS, &call_duration_ns);
+  log_call_duration(call_duration_ns, "API Remoting LoadLibrary");
 
   if (!decoder) {
     FATAL("%s: hypercall error: failed to kick the API remoting hypercall. :/", __func__);
-    return APIR_LOAD_LIBRARY_HYPERCALL_ERROR;
+    return APIR_LOAD_LIBRARY_HYPERCALL_INITIALIZATION_ERROR;
   }
 
-  ret = (ApirLoadLibraryReturnCode) remote_call_finish(encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   if (ret == APIR_LOAD_LIBRARY_SUCCESS) {
     INFO("%s: The API Remoting backend was successfully loaded and initialized", __func__);
@@ -531,28 +548,31 @@ remote_call_prepare(
   return &enc;
 }
 
-int32_t
-remote_call_finish(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec) {
+void
+remote_call_finish(
+  struct virtgpu *gpu,
+  struct vn_cs_encoder *enc,
+  struct vn_cs_decoder *dec) {
+  UNUSED(gpu);
+
   if (!enc) {
-    WARNING("Invalid (null) encoder :/");
+    ERROR("Invalid (null) encoder :/");
   }
+
   if (!dec) {
-    FATAL("Invalid (null) decoder :/");
+    ERROR("Invalid (null) decoder :/");
   }
-  int32_t remote_call_ret;
-  vn_decode_int32_t(dec, &remote_call_ret);
 
   // encoder and decoder are statically allocated, nothing to do to release them
-
-  return remote_call_ret;
 }
 
-struct vn_cs_decoder *
+uint32_t
 remote_call(
   struct virtgpu *gpu,
   struct vn_cs_encoder *encoder,
-  float max_wait_ms
-  )
+  struct vn_cs_decoder **decoder,
+  float max_wait_ms,
+  long long *call_duration_ns)
 {
   /*
    * Prepare the reply notification pointer
@@ -582,6 +602,8 @@ remote_call(
     .out_syncobjs = 0,
   };
 
+  *decoder = NULL;
+
   int ret = drmIoctl(gpu->fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &args);
 
   if (ret != 0) {
@@ -598,8 +620,15 @@ remote_call(
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
   long long start_time = (long long)ts_start.tv_sec * 1000000000LL + ts_start.tv_nsec;
 
-  bool timeout = false;
-  while (std::atomic_load_explicit(atomic_reply_notif, std::memory_order_acquire) == 0) {
+  bool timedout = false;
+  uint32_t notif_value = 0;
+  while (true) {
+    notif_value = std::atomic_load_explicit(atomic_reply_notif, std::memory_order_acquire);
+
+    if (notif_value != 0) {
+      break;
+    }
+
     int64_t base_sleep_us = 15;
 
     os_time_sleep(base_sleep_us);
@@ -610,38 +639,43 @@ remote_call(
       float duration_ms = (end_time - start_time) / 1000000;
 
       if (duration_ms > max_wait_ms) {
-        timeout = true;
+        timedout = true;
         break;
       }
     }
   }
 
-  long long duration_ns = stop_timer(&wait_host_reply_timer);
+  if (call_duration_ns) {
+    *call_duration_ns = stop_timer(&wait_host_reply_timer);
+  }
 
-  if (max_wait_ms) {
-    double duration_ms = (double) duration_ns / 1e6;  // 1 millisecond = 1e6 nanoseconds
-    double duration_s  = (double) duration_ns / 1e9;  // 1 second = 1e9 nanoseconds
-
-    if (duration_s > 1) {
-      MESSAGE("%s: waited %.2fs for the host reply...", __func__, duration_s);
-    } else if (duration_ms > 1) {
-      MESSAGE("%s: waited %.2fms for the host reply...", __func__, duration_ms);
-    } else {
-      MESSAGE("%s: waited %lldns for the host reply...", __func__, duration_ns);
-    }
-
-    if (timeout) {
-      ERROR("timeout waiting for the host answer...");
-      return NULL;
-    }
+  if (max_wait_ms && timedout) {
+      ERROR("timed out waiting for the host answer...");
+      return APIR_FORWARD_TIMEOUT;
   }
 
   /*
    * Prepare the decoder
    */
-  static struct vn_cs_decoder dec;
-  dec.cur = (char *) gpu->reply_shmem->mmap_ptr + sizeof(*atomic_reply_notif);
-  dec.end = (char *) gpu->reply_shmem->mmap_ptr + gpu->reply_shmem->mmap_size;
+  static struct vn_cs_decoder response_dec;
+  response_dec.cur = (char *) gpu->reply_shmem->mmap_ptr + sizeof(*atomic_reply_notif);
+  response_dec.end = (char *) gpu->reply_shmem->mmap_ptr + gpu->reply_shmem->mmap_size;
+  *decoder = &response_dec;
 
-  return &dec;
+  // extract the actual return value from the notif flag
+  uint32_t returned_value = notif_value - 1;
+  return returned_value;
+}
+
+static void log_call_duration(long long call_duration_ns, const char *name) {
+  double call_duration_ms = (double) call_duration_ns / 1e6;  // 1 millisecond = 1e6 nanoseconds
+  double call_duration_s  = (double) call_duration_ns / 1e9;  // 1 second = 1e9 nanoseconds
+
+  if (call_duration_s > 1) {
+    MESSAGE("%s: waited %.2fs for the %s host reply...", __func__, call_duration_s, name);
+  } else if (call_duration_ms > 1) {
+    MESSAGE("%s: waited %.2fms for the %s host reply...", __func__, call_duration_ms, name);
+  } else {
+    MESSAGE("%s: waited %lldns for the %s host reply...", __func__, call_duration_ns, name);
+  }
 }

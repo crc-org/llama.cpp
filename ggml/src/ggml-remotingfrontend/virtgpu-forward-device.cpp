@@ -10,15 +10,16 @@ apir_device_get_count(struct virtgpu *gpu) {
 
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_COUNT);
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_int32_t(decoder, &dev_count);
 
   INFO("%s: Forward DEV COUNT --> %d ", __func__, dev_count);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return dev_count;
 }
@@ -32,9 +33,10 @@ apir_device_get_name(struct virtgpu *gpu) {
   }
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_NAME);
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   const size_t string_size = vn_decode_array_size_unchecked(decoder);
   string = (char *) vn_cs_decoder_alloc_array(decoder, sizeof(char), string_size);
@@ -45,7 +47,7 @@ apir_device_get_name(struct virtgpu *gpu) {
 
   INFO("%s: Forward DEV NAME --> %s", __func__, string);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return string;
 }
@@ -54,10 +56,11 @@ const char *
 apir_device_get_description(struct virtgpu *gpu) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_DESCRIPTION);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   const size_t string_size = vn_decode_array_size_unchecked(decoder);
   char *string = (char *) vn_cs_decoder_alloc_array(decoder, sizeof(char), string_size);
@@ -68,7 +71,7 @@ apir_device_get_description(struct virtgpu *gpu) {
 
   INFO("%s: Forward DEV DESCR --> %s", __func__, string);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return string;
 }
@@ -83,16 +86,17 @@ apir_device_get_type(struct virtgpu *gpu) {
 
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_TYPE);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_uint32_t(decoder, &dev_type);
 
   INFO("%s: Forward DEV TYPE --> %d ", __func__, dev_type);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return dev_type;
 }
@@ -113,10 +117,11 @@ apir_device_get_memory(struct virtgpu *gpu, size_t *free, size_t *total) {
   */
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_MEMORY);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_size_t(decoder, &dev_free);
   vn_decode_size_t(decoder, &dev_total);
@@ -128,7 +133,7 @@ apir_device_get_memory(struct virtgpu *gpu, size_t *free, size_t *total) {
   INFO("%s: Forward DEV TOTAL mem --> %zu MB", __func__, dev_total / 1024 / 1024);
 
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return;
 }
@@ -137,16 +142,18 @@ bool
 apir_device_supports_op(struct virtgpu *gpu, const ggml_tensor *op) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
+
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_SUPPORTS_OP);
 
   vn_encode_ggml_tensor_inline(encoder, op);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   bool supports_op;
   vn_decode_bool_t(decoder, &supports_op);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return supports_op;
 }
@@ -155,15 +162,16 @@ apir_buffer_type_host_handle_t
 apir_device_get_buffer_type(struct virtgpu *gpu) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_BUFFER_TYPE);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   apir_buffer_type_host_handle_t buft_handle;
   vn_decode_apir_buffer_type_host_handle_t(decoder, &buft_handle);
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return buft_handle;
 }
@@ -176,10 +184,11 @@ apir_device_get_props(struct virtgpu *gpu,
 		      bool *events) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_PROPS);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_bool_t(decoder, async);
   vn_decode_bool_t(decoder, host_buffer);
@@ -187,7 +196,7 @@ apir_device_get_props(struct virtgpu *gpu,
   vn_decode_bool_t(decoder, events);
 
   /* *** */
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return;
 }
@@ -198,6 +207,8 @@ apir_device_buffer_from_ptr(struct virtgpu *gpu,
 			    size_t max_tensor_size) {
   struct vn_cs_encoder *encoder;
   struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
+
   apir_buffer_context_t buffer_context;
 
   REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_BUFFER_FROM_PTR);
@@ -214,14 +225,14 @@ apir_device_buffer_from_ptr(struct virtgpu *gpu,
   vn_encode_size_t(encoder, &size);
   vn_encode_size_t(encoder, &max_tensor_size);
 
-  REMOTE_CALL(gpu, encoder, decoder);
+  REMOTE_CALL(gpu, encoder, decoder, ret);
 
   vn_decode_apir_buffer_host_handle_t(decoder, &buffer_context.host_handle);
   buffer_context.buft_host_handle = vn_decode_apir_buffer_type_host_handle(decoder);
 
   /* *** */
 
-  REMOTE_CALL_FINISH(gpu, encoder, decoder);
+  remote_call_finish(gpu, encoder, decoder);
 
   return buffer_context;
 }
