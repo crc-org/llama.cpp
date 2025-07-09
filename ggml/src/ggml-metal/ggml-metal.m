@@ -8,6 +8,9 @@
 
 #import <Metal/Metal.h>
 
+#undef GGML_LOG_DEBUG
+#define GGML_LOG_DEBUG(...)
+
 #undef MIN
 #undef MAX
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -1076,8 +1079,6 @@ static struct ggml_backend_metal_context * ggml_metal_init(ggml_backend_dev_t de
                 GGML_LOG_ERROR("%s: error: load pipeline error: %s\n", __func__, [[error description] UTF8String]); \
                 return NULL; \
             } \
-        } else { \
-            GGML_LOG_WARN("%s: skipping %-40s (not supported)\n", __func__, "kernel_"#name); \
         }
 
         const bool has_simdgroup_mm        = ctx_dev->has_simdgroup_mm;
@@ -5139,9 +5140,53 @@ static bool ggml_metal_encode_node(
     return true;
 }
 
+long long timer_start;
+long long timer_total;
+long long timer_count;
+
+static inline void start_timer(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  timer_start = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static inline void stop_timer(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  long long timer_end = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+
+  timer_total += (timer_end - timer_start);
+  timer_count += 1;
+}
+
+static void show_timer(void) {
+  double ms = timer_total/1000000;
+  double itl = ms/timer_count;
+  double speed = 1/itl * 1000;
+
+  printf("METAL compute_graph: [%9.0f] ms for %lld invokations | ITL %.2f ms | throughput = %.2f t/s\n",ms, timer_count, itl, speed);
+
+  timer_start = 0;
+  timer_total = 1; // to avoid re-registering
+  timer_count = 0;
+}
+
+static void show_timer_signal(int sig) {
+  GGML_UNUSED(sig);
+  show_timer();
+}
+
 static enum ggml_status ggml_metal_graph_compute(
             ggml_backend_t   backend,
         struct ggml_cgraph * gf) {
+
+  if (timer_total == 0) {
+    signal(SIGUSR1, show_timer_signal); // kill -USR1 $(cat /tmp/krunkit.pid)
+    atexit(show_timer);
+  }
+
+  start_timer();
+
     struct ggml_backend_metal_context        * ctx     = backend->context;
     struct ggml_backend_metal_device_context * ctx_dev = backend->device->context;
 
@@ -5268,6 +5313,8 @@ static enum ggml_status ggml_metal_graph_compute(
             [[MTLCaptureManager sharedCaptureManager] stopCapture];
         }
     }
+
+  stop_timer();
 
     return GGML_STATUS_SUCCESS;
 }
@@ -6021,3 +6068,16 @@ ggml_backend_reg_t ggml_backend_metal_reg(void) {
 }
 
 GGML_BACKEND_DL_IMPL(ggml_backend_metal_reg)
+
+
+GGML_BACKEND_API void
+ggml_backend_metal_get_device_context(ggml_backend_dev_t dev,
+				      bool *has_simdgroup_mm,
+				      bool *has_simdgroup_reduction,
+				      bool *use_bfloat) {
+  struct ggml_backend_metal_device_context *dev_ctx = dev->context ;
+
+  *use_bfloat = dev_ctx->use_bfloat;
+  *has_simdgroup_reduction = dev_ctx->has_simdgroup_reduction;
+  *has_simdgroup_mm = dev_ctx->has_simdgroup_mm;
+}
