@@ -9,6 +9,7 @@ const struct ggml_backend_metal_device_context *get_metal_dev_context(const ggml
     return &metal_dev_ctx;
   }
 
+  has_metal_dev_ctx = true;
   struct virtgpu *gpu = DEV_TO_GPU(dev);
 
   apir_metal_get_device_context(gpu, &metal_dev_ctx);

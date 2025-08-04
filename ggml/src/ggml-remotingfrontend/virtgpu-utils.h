@@ -89,7 +89,8 @@ FATAL(const char *format, ...) {
   vfprintf(stderr, format, argptr);
   fprintf(stderr, "\n");
   va_end(argptr);
-  assert(false);
+
+  abort();
 }
 
 static inline bool

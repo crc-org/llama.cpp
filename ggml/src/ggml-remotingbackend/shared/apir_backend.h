@@ -1,10 +1,11 @@
 #pragma once
 
-#define APIR_BACKEND_INITIALIZE_SUCCESSS 0
+#define APIR_BACKEND_INITIALIZE_SUCCESS 0
 #define APIR_BACKEND_INITIALIZE_CANNOT_OPEN_BACKEND_LIBRARY 1
 #define APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY 2
 #define APIR_BACKEND_INITIALIZE_MISSING_BACKEND_SYMBOLS 3
 #define APIR_BACKEND_INITIALIZE_MISSING_GGML_SYMBOLS 4
+
 #define APIR_BACKEND_INITIALIZE_BACKEND_FAILED 5
 // new entries here need to be added to the apir_backend_initialize_error function below
 
@@ -89,14 +90,14 @@ extern struct timer_data set_tensor_from_ptr_timer;
 
 static inline void start_timer(struct timer_data *timer) {
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  clock_gettime(CLOCK_MONOTONIC, &ts);
   timer->start = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
 // returns the duration in ns
 static inline long long stop_timer(struct timer_data *timer) {
   struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  clock_gettime(CLOCK_MONOTONIC, &ts);
   long long timer_end = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 
   long long duration = (timer_end - timer->start);
@@ -111,6 +112,10 @@ static inline void show_timer(struct timer_data *timer) {
   double itl = ms/timer->count;
   double speed = 1/itl * 1000;
 
+  if (!timer->total) {
+    return;
+  }
+
   INFO("%15s [%9.0f] ms for %4ld invocations | ITL %2.2f ms | throughput = %4.2f t/s (%4.2f ms/call)",
        timer->name, ms, timer->count, itl, speed, ms/timer->count);
 }
@@ -121,7 +126,7 @@ static const char *apir_backend_initialize_error(int code) {
     if (code == code_name) return #code_name;	 \
   } while (0)					 \
 
-  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_SUCCESSS);
+  APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_SUCCESS);
   APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_CANNOT_OPEN_BACKEND_LIBRARY);
   APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_CANNOT_OPEN_GGML_LIBRARY);
   APIR_BACKEND_INITIALIZE_ERROR(APIR_BACKEND_INITIALIZE_MISSING_BACKEND_SYMBOLS);
