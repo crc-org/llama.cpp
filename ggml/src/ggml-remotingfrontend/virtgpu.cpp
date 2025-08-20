@@ -83,7 +83,7 @@ virtgpu_handshake(struct virtgpu *gpu) {
   uint32_t ret_magic;
   long long call_duration_ns;
   ret_magic = remote_call(gpu, encoder, &decoder, APIR_HANDSHAKE_MAX_WAIT_MS, &call_duration_ns);
-  log_call_duration(call_duration_ns, "API Remoting LoadLibrary");
+  log_call_duration(call_duration_ns, "API Remoting handshake");
 
   if (!decoder) {
     FATAL("%s: failed to initiate the communication with the virglrenderer library. "
