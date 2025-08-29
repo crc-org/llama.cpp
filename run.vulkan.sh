@@ -13,7 +13,7 @@ fi
 
 ICD_DIR=/Users/kevinpouget/.local/share/vulkan/icd.d
 
-MESA_FLAVOR=work
+MESA_FLAVOR=good
 if [[ "$MESA_FLAVOR" == "work" ]]; then
     export VK_ICD_FILENAMES=$ICD_DIR/virtio_icd.aarch64.json
 elif [[ "$MESA_FLAVOR" == "good" ]]; then

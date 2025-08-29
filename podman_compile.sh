@@ -8,7 +8,6 @@ set -o errtrace
 
 opts=""
 opts="$opts --device /dev/dri "
-echo "Running with the GPU passthrough"
 
 #IMAGE=quay.io/ramalama/remoting:latest
 IMAGE=localhost/mesa:compile
