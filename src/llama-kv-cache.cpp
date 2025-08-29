@@ -123,7 +123,9 @@ llama_kv_cache::llama_kv_cache(
             dev_name = ggml_backend_dev_name(dev);
         }
 
+	/*
         LLAMA_LOG_DEBUG("%s: layer %3d: dev = %s\n", __func__, il, dev_name);
+	*/
 
         ggml_context * ctx = ctx_for_buft(buft);
         if (!ctx) {

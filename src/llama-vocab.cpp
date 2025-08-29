@@ -2357,8 +2357,8 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
             } else {
                 // token is control, but not marked as EOG -> print a debug log
                 if (id_to_token[t.second].attr & LLAMA_TOKEN_ATTR_CONTROL && special_eog_ids.count(t.second) == 0) {
-                    LLAMA_LOG_DEBUG("%s: control token: %6d '%s' is not marked as EOG\n",
-                            __func__, t.second, t.first.c_str());
+                    //LLAMA_LOG_DEBUG("%s: control token: %6d '%s' is not marked as EOG\n",
+                    //        __func__, t.second, t.first.c_str());
                 }
             }
         }
@@ -3204,6 +3204,7 @@ int32_t llama_vocab::impl::detokenize(
 }
 
 void llama_vocab::impl::print_info() const {
+    return;
     LLAMA_LOG_INFO("%s: vocab type       = %s\n",     __func__, type_name().c_str());
     LLAMA_LOG_INFO("%s: n_vocab          = %u\n",     __func__, vocab.n_tokens());
     LLAMA_LOG_INFO("%s: n_merges         = %u\n",     __func__, (uint32_t) bpe_ranks.size());
@@ -3569,6 +3570,7 @@ std::string llama_vocab::detokenize(const std::vector<llama_token> & tokens, boo
 }
 
 void llama_vocab::print_info() const {
+    return;
     pimpl->print_info();
 }
 
