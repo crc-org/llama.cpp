@@ -12,7 +12,7 @@ apir_metal_get_device_context(struct virtgpu *gpu, struct ggml_backend_metal_dev
 
   vn_decode_bool_t(decoder, &metal_dev_ctx->has_simdgroup_mm);
   vn_decode_bool_t(decoder, &metal_dev_ctx->has_simdgroup_reduction);
-  vn_decode_bool_t(decoder, &metal_dev_ctx->use_bfloat);
+  vn_decode_bool_t(decoder, &metal_dev_ctx->has_bfloat);
 
   remote_call_finish(gpu, encoder, decoder);
 

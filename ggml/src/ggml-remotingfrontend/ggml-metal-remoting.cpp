@@ -17,13 +17,12 @@ const struct ggml_backend_metal_device_context *get_metal_dev_context(const ggml
   return &metal_dev_ctx;
 }
 
+bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_context *dev_ctx, const struct ggml_tensor * op) {
+    const bool has_simdgroup_mm        = dev_ctx->has_simdgroup_mm;
+    const bool has_simdgroup_reduction = dev_ctx->has_simdgroup_reduction;
+    const bool has_bfloat              = dev_ctx->has_bfloat;
 
-bool ggml_metal_supports_op(const struct ggml_backend_metal_device_context * ctx_dev, const struct ggml_tensor * op) {
-    const bool has_simdgroup_mm        = ctx_dev->has_simdgroup_mm;
-    const bool has_simdgroup_reduction = ctx_dev->has_simdgroup_reduction;
-    const bool use_bfloat              = ctx_dev->use_bfloat;
-
-    if (!use_bfloat) {
+    if (!has_bfloat) {
         if (op->type == GGML_TYPE_BF16) {
             return false;
         }

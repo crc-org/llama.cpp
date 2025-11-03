@@ -56,7 +56,7 @@ ggml_backend_remoting_device_supports_op(ggml_backend_dev_t dev, const ggml_tens
 
   struct ggml_backend_remoting_device_context *device_ctx = GET_DEVICE_CONTEXT();
 
-  return ggml_metal_supports_op(device_ctx->metal_dev_ctx, op);
+  return ggml_metal_device_supports_op(device_ctx->metal_dev_ctx, op);
 #else
   struct virtgpu *gpu = DEV_TO_GPU(dev);
 
