@@ -86,27 +86,33 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
         case GGML_OP_SCALE:
         case GGML_OP_CONV_TRANSPOSE_1D:
             return true;
+        case GGML_OP_CONV_TRANSPOSE_2D:
+            return ggml_is_contiguous(op->src[0]) && ggml_is_contiguous(op->src[1]) &&
+                (op->src[0]->type == GGML_TYPE_F16 || op->src[0]->type == GGML_TYPE_F32) &&
+                op->src[1]->type == GGML_TYPE_F32 &&
+                op->type == GGML_TYPE_F32;
         case GGML_OP_CLAMP:
             return op->src[0]->type == GGML_TYPE_F32;
         case GGML_OP_SQR:
         case GGML_OP_SQRT:
         case GGML_OP_SIN:
         case GGML_OP_COS:
-            return ggml_is_contiguous(op->src[0]) && op->src[0]->type == GGML_TYPE_F32;
         case GGML_OP_LOG:
-            return false; // TODO: implement
+            return ggml_is_contiguous(op->src[0]) && op->src[0]->type == GGML_TYPE_F32;
+        case GGML_OP_SUM:
+            return has_simdgroup_reduction && ggml_is_contiguous(op->src[0]);
         case GGML_OP_SUM_ROWS:
         case GGML_OP_MEAN:
         case GGML_OP_SOFT_MAX:
         case GGML_OP_GROUP_NORM:
             return has_simdgroup_reduction && ggml_is_contiguous_rows(op->src[0]);
-        case GGML_OP_RMS_NORM:
         case GGML_OP_L2_NORM:
             return has_simdgroup_reduction && (op->ne[0] % 4 == 0 && ggml_is_contiguous_1(op->src[0]));
         case GGML_OP_ARGMAX:
-            return true;
+            return has_simdgroup_reduction;
         case GGML_OP_NORM:
-            return has_simdgroup_reduction && (op->ne[0] % 4 == 0 && ggml_is_contiguous_1(op->src[0]));
+        case GGML_OP_RMS_NORM:
+            return has_simdgroup_reduction && (ggml_is_contiguous_rows(op->src[0]));
         case GGML_OP_ROPE:
             return true;
         case GGML_OP_IM2COL:
@@ -116,18 +122,31 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
         case GGML_OP_UPSCALE:
             return op->src[0]->type == GGML_TYPE_F32 && op->op_params[0] == GGML_SCALE_MODE_NEAREST;
         case GGML_OP_POOL_2D:
+            return op->src[0]->type == GGML_TYPE_F32;
         case GGML_OP_PAD:
+            return (ggml_get_op_params_i32(op, 0) == 0) && (ggml_get_op_params_i32(op, 2) == 0) &&
+                   (ggml_get_op_params_i32(op, 4) == 0) && (ggml_get_op_params_i32(op, 6) == 0);
         case GGML_OP_PAD_REFLECT_1D:
         case GGML_OP_TIMESTEP_EMBEDDING:
-        case GGML_OP_ARGSORT:
         case GGML_OP_LEAKY_RELU:
             return op->src[0]->type == GGML_TYPE_F32;
+        case GGML_OP_ARGSORT:
+            // TODO: Support arbitrary column width
+            return op->src[0]->ne[0] <= 1024;
         case GGML_OP_ARANGE:
             return true;
         case GGML_OP_FLASH_ATTN_EXT:
-            if (op->src[0]->ne[0] == 32) {
-                // head size == 32 (e.g. bert-bge-small)
-                // TODO: not sure if it is worth adding kernels for this size
+            // for new head sizes, add checks here
+            if (op->src[0]->ne[0] != 32 &&
+                op->src[0]->ne[0] != 40 &&
+                op->src[0]->ne[0] != 64 &&
+                op->src[0]->ne[0] != 72 &&
+                op->src[0]->ne[0] != 80 &&
+                op->src[0]->ne[0] != 96 &&
+                op->src[0]->ne[0] != 112 &&
+                op->src[0]->ne[0] != 128 &&
+                op->src[0]->ne[0] != 192 &&
+                op->src[0]->ne[0] != 256) {
                 return false;
             }
             if (op->src[0]->ne[0] == 576) {
@@ -141,13 +160,13 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
             return has_simdgroup_mm; // TODO: over-restricted for vec-kernels
         case GGML_OP_SSM_CONV:
         case GGML_OP_SSM_SCAN:
+            return has_simdgroup_reduction;
         case GGML_OP_RWKV_WKV6:
         case GGML_OP_RWKV_WKV7:
             return true;
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
-            return has_simdgroup_reduction &&
-                (op->src[0]->type != GGML_TYPE_F32 || op->src[1]->type == GGML_TYPE_F32);
+            return has_simdgroup_reduction;
         case GGML_OP_CPY:
         case GGML_OP_DUP:
         case GGML_OP_CONT:
@@ -164,6 +183,7 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
                            case GGML_TYPE_Q5_0:
                            case GGML_TYPE_Q5_1:
                            case GGML_TYPE_IQ4_NL:
+                           case GGML_TYPE_I32:
                                 return true;
                            default:
                                 return false;
@@ -196,25 +216,14 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
                             default:
                                 return false;
                         }
-                    default:
-                        return false;
-                };
-            }
-        case GGML_OP_SET:
-            {
-                switch (op->src[0]->type) {
-                    case GGML_TYPE_F32:
                     case GGML_TYPE_I32:
-                        return true;
+                        return op->type == GGML_TYPE_F32;
                     default:
                         return false;
                 };
             }
-        case GGML_OP_DIAG_MASK_INF:
         case GGML_OP_GET_ROWS:
-            {
-                return op->ne[3] == 1;
-            }
+            return true;
         case GGML_OP_SET_ROWS:
             {
                 if (op->src[0]->type != GGML_TYPE_F32) {
@@ -236,6 +245,9 @@ bool ggml_metal_device_supports_op(const struct ggml_backend_metal_device_contex
                         return false;
                 };
             }
+        case GGML_OP_OPT_STEP_ADAMW:
+        case GGML_OP_OPT_STEP_SGD:
+            return has_simdgroup_reduction;
         default:
             return false;
     }
