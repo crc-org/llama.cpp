@@ -384,9 +384,9 @@ struct ggml_metal_pipeline_with_params ggml_metal_library_compile_pipeline(ggml_
         NSError * error = nil;
 
         NSString * base_func = [NSString stringWithUTF8String:base];
-
+#if 0
         GGML_LOG_DEBUG("%s: compiling pipeline: base = '%s', name = '%s'\n", __func__, base, name);
-
+#endif
         id<MTLFunction> mtl_function;
         if (!cv) {
             mtl_function = [lib->obj newFunctionWithName:base_func];
@@ -418,12 +418,12 @@ struct ggml_metal_pipeline_with_params ggml_metal_library_compile_pipeline(ggml_
 
             return res;
         }
-
+#if 0
         GGML_LOG_DEBUG("%s: loaded %-40s %16p | th_max = %4d | th_width = %4d\n", __func__, name,
                 (void *) obj,
                 (int)    obj.maxTotalThreadsPerThreadgroup,
                 (int)    obj.threadExecutionWidth);
-
+#endif
         if (obj.maxTotalThreadsPerThreadgroup == 0 || obj.threadExecutionWidth == 0) {
             [obj release];
 
