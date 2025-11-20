@@ -13,8 +13,8 @@
 
 
 // 1 is fast, 0 avoid micro-benchmark crashes
-#define USE_ALWAYS_TRUE_SUPPORTS_OP 0
-#define USE_METAL_GUEST_SUPPORTS_OP 1
+#define USE_ALWAYS_TRUE_SUPPORTS_OP 1
+#define USE_METAL_GUEST_SUPPORTS_OP 0
 
 #define DEV_TO_GPU(name) \
   ((struct ggml_backend_remoting_device_context *) (name)->context)->gpu
