@@ -1128,6 +1128,34 @@ static void print_word_and_concatenate_to_response(const std::string & piece, st
     response += piece;
 }
 
+static long long timer_start = 0;
+static long long timer_total = 0;
+static long long timer_count = 0;
+
+static inline void start_timer(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  timer_start = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static inline void stop_timer(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
+  long long timer_end = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+
+  timer_total += (timer_end - timer_start);
+  timer_count += 1;
+}
+
+static void show_timer(void) {
+  double ms = timer_total/1000000;
+  double itl = ms/timer_count;
+  double speed = 1/itl * 1000;
+
+  printe("LLAMA generate [%9.0f] ms for %4lld invocations | ITL %2.2f ms | throughput = %4.2f t/s\n", ms, timer_count, itl, speed);
+}
+
+
 // helper function to evaluate a prompt and generate a response
 static int generate(LlamaData & llama_data, const std::string & prompt, std::string & response) {
     const llama_vocab * vocab = llama_model_get_vocab(llama_data.model.get());
@@ -1137,10 +1165,15 @@ static int generate(LlamaData & llama_data, const std::string & prompt, std::str
         return 1;
     }
 
+    int cr = atexit(show_timer);
+    GGML_ASSERT(cr == 0);
+
     // prepare a batch for the prompt
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     llama_token new_token_id;
+
     while (true) {
+        start_timer();
         check_context_size(llama_data.context, batch);
         if (llama_decode(llama_data.context.get(), batch)) {
             printe("failed to decode\n");
@@ -1162,6 +1195,7 @@ static int generate(LlamaData & llama_data, const std::string & prompt, std::str
 
         // prepare the next batch with the sampled token
         batch = llama_batch_get_one(&new_token_id, 1);
+	stop_timer();
     }
 
     printf(LOG_COL_DEFAULT);

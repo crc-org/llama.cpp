@@ -513,13 +513,13 @@ enum ggml_status ggml_metal_graph_compute(ggml_metal_t ctx, struct ggml_cgraph *
 }
 
 void ggml_metal_graph_optimize(ggml_metal_t ctx, struct ggml_cgraph * gf) {
-    //const int64_t t_start = ggml_time_us();
+    const int64_t t_start = ggml_time_us();
 
     if (ctx->use_graph_optimize) {
         ggml_graph_optimize(gf);
     }
 
-    //printf("%s: graph optimize took %.3f ms\n", __func__, (ggml_time_us() - t_start) / 1000.0);
+    printf("%s: graph optimize took %.3f ms\n", __func__, (ggml_time_us() - t_start) / 1000.0);
 }
 
 void ggml_metal_set_n_cb(ggml_metal_t ctx, int n_cb) {
