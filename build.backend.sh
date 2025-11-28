@@ -10,7 +10,9 @@ else
     FLAVOR=""
 fi
 
-export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+if [[ $(uname) == "Darwin" ]]; then
+    export SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+fi
 
 if [[ "$FLAVOR" == "-prod" ]]; then
     cat <<EOF
@@ -27,7 +29,7 @@ elif [[ "${BENCH_MODE:-}" == "perf" ]]; then
     TARGETS="$TARGETS test-backend-ops"
 fi
 
-cmake --build ../build.remoting-backend$FLAVOR --parallel 8 --target $TARGETS "$@"
+cmake --build ../build.remoting-backend$FLAVOR --target $TARGETS "$@" --parallel 8
 
 if [[ $? == 0 ]]; then
     touch READY_backend
