@@ -32,8 +32,21 @@ get_track_backend_buffers() {
 
 ggml_tensor *
 deserialize_tensor(struct ggml_context * ctx, const rpc_tensor * tensor) {
+    // Validate tensor type before using it
+    if (tensor->type >= GGML_TYPE_COUNT) {
+        GGML_LOG_ERROR("[%s] invalid tensor type received: %u\n", __func__, tensor->type);
+        return nullptr;
+    }
+
   ggml_tensor * result = ggml_new_tensor_4d(ctx, (ggml_type) tensor->type,
                                             tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3]);
+
+  // ggml_new_tensor_4d might fail if dimensions are invalid, although less likely to crash than invalid type
+  if (result == nullptr) {
+    GGML_LOG_ERROR("[%s] ggml_new_tensor_4d failed for type %u\\n", __func__, tensor->type);
+    return nullptr;
+  }
+
   for (uint32_t i = 0; i < GGML_MAX_DIMS; i++) {
     result->nb[i] = tensor->nb[i];
   }
@@ -49,9 +62,6 @@ deserialize_tensor(struct ggml_context * ctx, const rpc_tensor * tensor) {
     uint64_t tensor_size = (uint64_t) ggml_nbytes(result);
     uint64_t buffer_start = (uint64_t) ggml_backend_buffer_get_base(result->buffer);
     uint64_t buffer_size = (uint64_t) ggml_backend_buffer_get_size(result->buffer);
-
-    // tensor->data is serialized as an offset to the buffer base address
-    tensor_data += buffer_start;
 
     GGML_ASSERT(tensor_data + tensor_size >= tensor_data); // check for overflow
     GGML_ASSERT(tensor_data >= buffer_start && tensor_data + tensor_size <= buffer_start + buffer_size);
