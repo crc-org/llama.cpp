@@ -108,6 +108,19 @@ deserialize_tensor(struct ggml_context * ctx, const rpc_tensor * tensor) {
   }
   result->buffer = reinterpret_cast<ggml_backend_buffer_t>(tensor->buffer);
 
+  // Look up the frontend buffer from the backend handle
+  if (result->buffer) {
+    apir_buffer_host_handle_t backend_handle = reinterpret_cast<apir_buffer_host_handle_t>(tensor->buffer);
+    ggml_backend_buffer_t frontend_buffer = ggml_remoting_lookup_frontend_buffer_from_backend_handle(backend_handle);
+
+    if (frontend_buffer) {
+      result->buffer = frontend_buffer;
+    } else {
+      WARNING("Could not find frontend buffer for backend handle 0x%lx\n", backend_handle);
+      result->buffer = nullptr;
+    }
+  }
+
   uint64_t tensor_data = tensor->data;
   if (result->buffer) {
     // require that the tensor data does not go beyond the buffer end
