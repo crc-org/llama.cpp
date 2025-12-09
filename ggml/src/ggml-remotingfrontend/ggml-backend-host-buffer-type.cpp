@@ -56,6 +56,10 @@ ggml_backend_remoting_host_buffer_type_alloc_buffer(ggml_backend_buffer_type_t b
   context->is_host_buffer = true;
 
   ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_remoting_buffer_interface, (void *) context, size);
+
+  // Register the buffer for tracking
+  ggml_remoting_register_buffer(buffer);
+
   INFO("##");
   INFO("## %s(%llx) --> %p <======================", __func__, size, buffer);
   INFO("##\n");
