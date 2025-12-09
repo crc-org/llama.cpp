@@ -40,6 +40,7 @@ uint32_t backend_buffer_type_alloc_buffer(struct vn_cs_encoder *enc, struct vn_c
 uint32_t backend_buffer_get_base(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_set_tensor(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_get_tensor(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
+uint32_t backend_buffer_cpy_tensor(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_clear(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_free_buffer(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 
@@ -74,6 +75,7 @@ static inline const char *backend_dispatch_command_name(ApirBackendCommandType t
   case APIR_COMMAND_TYPE_BUFFER_GET_BASE: return "backend_buffer_get_base";
   case APIR_COMMAND_TYPE_BUFFER_SET_TENSOR: return "backend_buffer_set_tensor";
   case APIR_COMMAND_TYPE_BUFFER_GET_TENSOR: return "backend_buffer_get_tensor";
+  case APIR_COMMAND_TYPE_BUFFER_CPY_TENSOR: return "backend_buffer_cpy_tensor";
   case APIR_COMMAND_TYPE_BUFFER_CLEAR: return "backend_buffer_clear";
   case APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER: return "backend_buffer_free_buffer";
 
@@ -114,6 +116,7 @@ static const backend_dispatch_t apir_backend_dispatch_table[APIR_BACKEND_DISPATC
   /* APIR_COMMAND_TYPE_BUFFER_GET_BASE  = */ backend_buffer_get_base,
   /* APIR_COMMAND_TYPE_BUFFER_SET_TENSOR  = */ backend_buffer_set_tensor,
   /* APIR_COMMAND_TYPE_BUFFER_GET_TENSOR  = */ backend_buffer_get_tensor,
+  /* APIR_COMMAND_TYPE_BUFFER_CPY_TENSOR  = */ backend_buffer_cpy_tensor,
   /* APIR_COMMAND_TYPE_BUFFER_CLEAR  = */ backend_buffer_clear,
   /* APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER  = */ backend_buffer_free_buffer,
 

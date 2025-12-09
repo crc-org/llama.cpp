@@ -53,17 +53,18 @@ typedef enum ApirBackendCommandType {
   APIR_COMMAND_TYPE_BUFFER_GET_BASE = 14,
   APIR_COMMAND_TYPE_BUFFER_SET_TENSOR = 15,
   APIR_COMMAND_TYPE_BUFFER_GET_TENSOR = 16,
-  APIR_COMMAND_TYPE_BUFFER_CLEAR = 17,
-  APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER = 18,
+  APIR_COMMAND_TYPE_BUFFER_CPY_TENSOR = 17,
+  APIR_COMMAND_TYPE_BUFFER_CLEAR = 18,
+  APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER = 19,
 
   /* backend */
-  APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 19,
+  APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 20,
 
   /* metal */
-  APIR_COMMAND_TYPE_METAL_GET_DEVICE_CONTEXT = 20,
+  APIR_COMMAND_TYPE_METAL_GET_DEVICE_CONTEXT = 21,
 
   // last command_type index + 1
-  APIR_BACKEND_DISPATCH_TABLE_COUNT = 21,
+  APIR_BACKEND_DISPATCH_TABLE_COUNT = 22,
 } ApirBackendCommandType;
 
 
@@ -87,6 +88,7 @@ struct timer_data {
 extern struct timer_data graph_compute_timer;
 extern struct timer_data get_tensor_timer;
 extern struct timer_data set_tensor_timer;
+extern struct timer_data cpy_tensor_timer;
 extern struct timer_data wait_host_reply_timer;
 extern struct timer_data get_tensor_from_ptr_timer;
 extern struct timer_data set_tensor_from_ptr_timer;
