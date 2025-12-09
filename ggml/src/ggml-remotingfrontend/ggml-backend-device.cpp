@@ -104,7 +104,6 @@ ggml_backend_remoting_device_get_props(ggml_backend_dev_t dev, struct ggml_backe
   props->type        = ggml_backend_remoting_device_get_type(dev);
   ggml_backend_remoting_device_get_memory(dev, &props->memory_free, &props->memory_total);
 
-#if 0
   struct virtgpu *gpu = DEV_TO_GPU(dev);
   apir_device_get_props(gpu,
 			&props->caps.async,
@@ -112,17 +111,16 @@ ggml_backend_remoting_device_get_props(ggml_backend_dev_t dev, struct ggml_backe
 			&props->caps.buffer_from_host_ptr,
 			&props->caps.events
     );
-#else
-  // ignore the actual backend answers and set it as we provide it in
-  // the API Remoting frontend
-  props->caps.async = false;
-  props->caps.host_buffer = false;
-  props->caps.buffer_from_host_ptr = false;
-  props->caps.events = false;
-#endif
 
-  INFO("%s: async=%d, host_buffer=%d!, buffer_from_host_ptr=%d!, events=%d",
-    __func__, props->caps.async, props->caps.host_buffer,
+  INFO("%s: backend: async=%d, host_buffer=%d, buffer_from_host_ptr=%d, events=%d",
+       __func__, props->caps.async, props->caps.host_buffer,
+       props->caps.buffer_from_host_ptr, props->caps.events);
+
+  props->caps.async = false;
+  props->caps.events = false;
+
+  INFO("%s: frontend: async=%d, host_buffer=%d, buffer_from_host_ptr=%d, events=%d",
+       __func__, props->caps.async, props->caps.host_buffer,
        props->caps.buffer_from_host_ptr, props->caps.events);
 }
 
