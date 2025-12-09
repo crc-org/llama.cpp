@@ -79,7 +79,7 @@ backend_graph_optimize(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, str
   uint32_t shmem_res_id;
   vn_decode_virtgpu_shmem_res_id(dec, &shmem_res_id);
 
-  const void *shmem_data = ctx->iface.get_shmem_ptr(ctx->virgl_ctx, shmem_res_id);
+  void *shmem_data = ctx->iface.get_shmem_ptr(ctx->virgl_ctx, shmem_res_id);
   if (!shmem_data) {
     FATAL("Couldn't get the shmem addr from virgl :/");
   }
@@ -91,6 +91,15 @@ backend_graph_optimize(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, str
   ggml_cgraph *cgraph = vn_decode_ggml_cgraph(&secondary_dec, cgraph_size);
 
   bck->iface.graph_optimize(bck, cgraph);
+
+  std::vector<uint8_t> cgraph_data;
+  size_t cgraph_new_size = vn_serialize_ggml_cgraph(cgraph, cgraph_data);
+
+  vn_encode_size_t(enc, &cgraph_new_size);
+
+  struct vn_cs_encoder secondary_enc = vn_cs_new_encoder((char *)shmem_data, cgraph_new_size);
+
+  vn_encode_cgraph_data(&secondary_enc, cgraph_data);
 
   return 0;
 }

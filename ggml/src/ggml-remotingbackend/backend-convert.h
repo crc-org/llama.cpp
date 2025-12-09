@@ -1,3 +1,4 @@
+#include "backend-utils.h"
 #include "shared/apir_backend.h"
 
 #define BUFFER_TO_HOST_HANDLE(name) ggml_buffer_to_apir_handle(name)
