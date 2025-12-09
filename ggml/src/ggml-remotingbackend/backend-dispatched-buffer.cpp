@@ -100,8 +100,6 @@ backend_buffer_get_tensor(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, 
     FATAL("Couldn't get the shmem addr from virgl :/");
   }
 
-  UNUSED(buffer);
-  UNUSED(tensor);
   buffer->iface.get_tensor(buffer, tensor, shmem_data, offset, size);
 
   stop_timer(&get_tensor_timer);
