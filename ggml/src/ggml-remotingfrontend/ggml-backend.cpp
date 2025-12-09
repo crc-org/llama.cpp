@@ -32,18 +32,15 @@ static ggml_status ggml_backend_remoting_graph_compute(ggml_backend_t backend, g
 
 static void ggml_backend_remoting_graph_optimize(ggml_backend_t backend, ggml_cgraph * cgraph) {
     struct virtgpu *gpu = DEV_TO_GPU(backend->device);
-#if true
-    UNUSED(gpu);
-    UNUSED(cgraph);
 
-    NOT_IMPLEMENTED;
-#else
     start_timer(&graph_compute_timer);
-    
-    apir_backend_graph_optimize(gpu, cgraph);
-    
+
+    ggml_cgraph * optimized_cgraph = apir_backend_graph_optimize(gpu, cgraph);
+
+    UNUSED(optimized_cgraph);
+    WARNING("Currently skipping the actual cgraph object upgrade");
+
     stop_timer(&graph_compute_timer);
-#endif
 }
 
 static ggml_backend_i ggml_backend_remoting_interface = {

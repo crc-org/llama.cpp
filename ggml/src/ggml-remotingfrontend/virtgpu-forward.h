@@ -45,6 +45,7 @@ bool apir_buffer_cpy_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_c
 /* backend */
 
 ggml_status apir_backend_graph_compute(struct virtgpu *gpu, ggml_cgraph *cgraph);
+void apir_backend_graph_optimize(struct virtgpu *gpu, ggml_cgraph *cgraph);
 
 /* metal */
 
