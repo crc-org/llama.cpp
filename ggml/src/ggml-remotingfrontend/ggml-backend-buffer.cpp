@@ -5,6 +5,7 @@
 
 struct timer_data get_tensor_timer = {0, 0, 0, "get_tensor"};
 struct timer_data set_tensor_timer = {0, 0, 0, "set_tensor"};
+struct timer_data cpy_tensor_timer = {0, 0, 0, "cpy_tensor"};
 
 struct timer_data get_tensor_from_ptr_timer = {0, 0, 0, "get_tensor_from_ptr"};
 struct timer_data set_tensor_from_ptr_timer = {0, 0, 0, "set_tensor_from_ptr"};
@@ -107,15 +108,17 @@ static void ggml_backend_remoting_buffer_get_tensor_from_ptr(ggml_backend_buffer
 }
 
 static bool ggml_backend_remoting_buffer_cpy_tensor(ggml_backend_buffer_t buffer, const ggml_tensor * src, ggml_tensor * dst) {
-  NOT_IMPLEMENTED;
+  IMPLEMENTED_ONCE;
 
-  // STOP_HERE;
+  struct virtgpu *gpu = BUFFER_TO_GPU(buffer);
 
-  return false;
+  start_timer(&cpy_tensor_timer);
 
-  UNUSED(buffer);
-  UNUSED(src);
-  UNUSED(dst);
+  bool ret = apir_buffer_cpy_tensor(gpu, BUFFER_TO_APIR_CONTEXT(buffer), src, dst);
+
+  stop_timer(&cpy_tensor_timer);
+
+  return ret;
 }
 
 static void ggml_backend_remoting_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {

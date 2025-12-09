@@ -40,6 +40,7 @@ void apir_buffer_get_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_c
 void apir_buffer_clear(struct virtgpu *gpu, apir_buffer_context_t *buffer_context,
 		       uint8_t value);
 void apir_buffer_free_buffer(struct virtgpu *gpu, apir_buffer_context_t *buffer_context);
+bool apir_buffer_cpy_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_context, const ggml_tensor *src, const ggml_tensor *dst);
 
 /* backend */
 

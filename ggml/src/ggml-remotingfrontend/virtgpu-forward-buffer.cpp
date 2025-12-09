@@ -114,6 +114,28 @@ apir_buffer_get_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_contex
 }
 #endif
 
+bool
+apir_buffer_cpy_tensor(struct virtgpu *gpu, apir_buffer_context_t *buffer_context, const ggml_tensor *src, const ggml_tensor *dst) {
+  struct vn_cs_encoder *encoder;
+  struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
+
+  REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_CPY_TENSOR);
+
+  vn_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
+  vn_encode_ggml_tensor(encoder, src);
+  vn_encode_ggml_tensor(encoder, dst);
+
+  REMOTE_CALL(gpu, encoder, decoder, ret);
+
+  bool ret_val;
+  vn_decode_bool_t(decoder, &ret_val);
+
+  remote_call_finish(gpu, encoder, decoder);
+
+  return ret_val;
+}
+
 void
 apir_buffer_clear(struct virtgpu *gpu, apir_buffer_context_t *buffer_context,
 		  uint8_t value) {
