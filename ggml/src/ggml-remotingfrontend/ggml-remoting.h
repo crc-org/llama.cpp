@@ -2,6 +2,8 @@
 
 #include <string>
 #include <memory>
+#include <unordered_map>
+#include <mutex>
 
 #include "ggml-remoting-frontend.h"
 
@@ -142,3 +144,34 @@ typedef std::weak_ptr<remoting_context_struct> remoting_context_ref;
 static inline apir_buffer_host_handle_t ggml_buffer_to_apir_handle(ggml_backend_buffer_t buffer) {
   return BUFFER_TO_HOST_HANDLE(buffer);
 }
+
+// Global buffer tracking for mapping backend handles to frontend handles
+class ggml_remoting_buffer_tracker {
+private:
+    static std::unordered_map<apir_buffer_host_handle_t, ggml_backend_buffer_t> backend_to_frontend_map;
+    static std::mutex map_mutex;
+
+public:
+    // Register a new frontend buffer with its backend handle
+    static void register_buffer(ggml_backend_buffer_t frontend_buffer, apir_buffer_host_handle_t backend_handle);
+
+    // Unregister a buffer when it's freed
+    static void unregister_buffer(apir_buffer_host_handle_t backend_handle);
+
+    // Look up the frontend buffer from a backend handle
+    static ggml_backend_buffer_t lookup_frontend_buffer(apir_buffer_host_handle_t backend_handle);
+
+    // Check if a backend handle is registered
+    static bool is_registered(apir_buffer_host_handle_t backend_handle);
+
+    // Get the current number of tracked buffers
+    static size_t get_buffer_count();
+
+    // Print debug information about tracked buffers
+    static void print_buffer_info();
+};
+
+// Convenience functions for easier use
+void ggml_remoting_register_buffer(ggml_backend_buffer_t frontend_buffer);
+void ggml_remoting_unregister_buffer(ggml_backend_buffer_t frontend_buffer);
+ggml_backend_buffer_t ggml_remoting_lookup_frontend_buffer_from_backend_handle(apir_buffer_host_handle_t backend_handle);

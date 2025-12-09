@@ -137,6 +137,9 @@ static void ggml_backend_remoting_buffer_free_buffer(ggml_backend_buffer_t buffe
 
   struct virtgpu *gpu = BUFFER_TO_GPU(buffer);
 
+  // Unregister the buffer from tracking before freeing
+  ggml_remoting_unregister_buffer(buffer);
+
   apir_buffer_free_buffer(gpu, BUFFER_TO_APIR_CONTEXT(buffer));
 
   struct ggml_backend_remoting_buffer_context *context = BUFFER_TO_GGML_CONTEXT(buffer);

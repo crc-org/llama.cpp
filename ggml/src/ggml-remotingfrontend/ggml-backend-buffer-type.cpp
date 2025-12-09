@@ -37,6 +37,9 @@ ggml_backend_remoting_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, 
 
   ggml_backend_buffer_t buffer = ggml_backend_buffer_init(buft, ggml_backend_remoting_buffer_interface, (void *) context, size);
 
+  // Register the buffer for tracking
+  ggml_remoting_register_buffer(buffer);
+
   return buffer;
 }
 
