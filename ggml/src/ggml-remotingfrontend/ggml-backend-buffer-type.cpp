@@ -15,7 +15,16 @@ ggml_backend_remoting_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, 
 
   context->gpu = gpu;
 
-  if (USE_BUFFER_TYPE_FROM_PTR) {
+  bool async__unused, host_buffer__unused, events__unused;
+  bool buffer_from_host_ptr;
+  apir_device_get_props(gpu,
+			&async__unused,
+			&host_buffer__unused,
+			&buffer_from_host_ptr,
+			&events__unused
+    );
+
+  if (buffer_from_host_ptr) {
     context->apir_context = apir_device_buffer_from_ptr(gpu, size, size);
     context->base = context->apir_context.shmem->mmap_ptr;
     context->is_from_ptr = true;

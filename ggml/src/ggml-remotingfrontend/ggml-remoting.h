@@ -16,11 +16,9 @@
 #ifdef __x86_64__ // linux
   #define USE_ALWAYS_TRUE_SUPPORTS_OP 1
   #define USE_METAL_GUEST_SUPPORTS_OP 0
-  #define USE_BUFFER_TYPE_FROM_PTR 0 // not working on Linux
 #else // macos
   #define USE_ALWAYS_TRUE_SUPPORTS_OP 1
   #define USE_METAL_GUEST_SUPPORTS_OP 0
-  #define USE_BUFFER_TYPE_FROM_PTR 1
 #endif
 
 #define DEV_TO_GPU(name) \
