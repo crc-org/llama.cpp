@@ -200,13 +200,12 @@ struct ggml_backend_registry {
         register_backend(ggml_backend_sycl_reg());
 #endif
 #ifdef GGML_USE_VULKAN
-	/* HACK: when compiling the APIR frontend/backend
-	 * simultaneously, with vulkan, vulkan gets loaded in the
-	 * frontend side and the ggml-remotingfrontend receives
-	 * unknown VK buffers ... */
-#ifndef GGML_USE_REMOTINGBACKEND
-        //register_backend(ggml_backend_vk_reg());
-#endif
+    // Add runtime disable check
+    if (getenv("GGML_DISABLE_VULKAN") == nullptr) {
+        register_backend(ggml_backend_vk_reg());
+    } else {
+        GGML_LOG_DEBUG("Vulkan backend disabled by GGML_DISABLE_VULKAN environment variable");
+    }
 #endif
 #ifdef GGML_USE_WEBGPU
         register_backend(ggml_backend_webgpu_reg());
