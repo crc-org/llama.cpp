@@ -35,6 +35,7 @@ uint32_t backend_buffer_type_get_alignment(struct vn_cs_encoder *enc, struct vn_
 uint32_t backend_buffer_type_get_max_size(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_type_is_host(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 uint32_t backend_buffer_type_alloc_buffer(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
+uint32_t backend_buffer_type_get_alloc_size(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
 
 /* buffer */
 uint32_t backend_buffer_get_base(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx);
@@ -70,6 +71,7 @@ static inline const char *backend_dispatch_command_name(ApirBackendCommandType t
   case APIR_COMMAND_TYPE_BUFFER_TYPE_GET_MAX_SIZE: return "backend_buffer_type_get_max_size";
   case APIR_COMMAND_TYPE_BUFFER_TYPE_IS_HOST: return "backend_buffer_type_is_host";
   case APIR_COMMAND_TYPE_BUFFER_TYPE_ALLOC_BUFFER: return "backend_buffer_type_alloc_buffer";
+  case APIR_COMMAND_TYPE_BUFFER_TYPE_GET_ALLOC_SIZE: return "backend_buffer_type_get_alloc_size";
 
   /* buffer */
   case APIR_COMMAND_TYPE_BUFFER_GET_BASE: return "backend_buffer_get_base";
@@ -110,6 +112,7 @@ static const backend_dispatch_t apir_backend_dispatch_table[APIR_BACKEND_DISPATC
   /* APIR_COMMAND_TYPE_BUFFER_TYPE_GET_MAX_SIZE  = */ backend_buffer_type_get_max_size,
   /* APIR_COMMAND_TYPE_BUFFER_TYPE_IS_HOST  = */ backend_buffer_type_is_host,
   /* APIR_COMMAND_TYPE_BUFFER_TYPE_ALLOC_BUFFER  = */ backend_buffer_type_alloc_buffer,
+  /* APIR_COMMAND_TYPE_BUFFER_TYPE_GET_ALLOC_SIZE  = */ backend_buffer_type_get_alloc_size,
 
   /* buffer */
 
