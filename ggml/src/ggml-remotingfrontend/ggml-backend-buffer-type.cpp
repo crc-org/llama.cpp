@@ -84,12 +84,20 @@ ggml_backend_remoting_buffer_type_is_host(ggml_backend_buffer_type_t buft) {
   return apir_buffer_type_is_host(gpu, buft);
 }
 
+static size_t
+ggml_backend_remoting_buffer_type_get_alloc_size(ggml_backend_buffer_type_t buft, const ggml_tensor * tensor) {
+  IMPLEMENTED_ONCE;
+  struct virtgpu *gpu = BUFT_TO_GPU(buft);
+
+  return apir_buffer_type_get_alloc_size(gpu, buft, tensor);
+}
+
 const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_type_interface = {
   /* .get_name         = */ ggml_backend_remoting_buffer_type_get_name,
   /* .alloc_buffer     = */ ggml_backend_remoting_buffer_type_alloc_buffer,
   /* .get_alignment    = */ ggml_backend_remoting_buffer_type_get_alignment,
   /* .get_max_size     = */ ggml_backend_remoting_buffer_type_get_max_size,
-  /* .get_alloc_size   = */ NULL, // defaults to ggml_nbytes
+  /* .get_alloc_size   = */ ggml_backend_remoting_buffer_type_get_alloc_size,
   /* .is_host          = */ NULL,
 };
 
@@ -98,7 +106,7 @@ const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_from_ptr_type_inte
   /* .alloc_buffer     = */ NULL,
   /* .get_alignment    = */ ggml_backend_remoting_buffer_type_get_alignment,
   /* .get_max_size     = */ ggml_backend_remoting_buffer_type_get_max_size,
-  /* .get_alloc_size   = */ NULL, // defaults to ggml_nbytes
+  /* .get_alloc_size   = */ ggml_backend_remoting_buffer_type_get_alloc_size,
   /* .is_host          = */ NULL,
 };
 

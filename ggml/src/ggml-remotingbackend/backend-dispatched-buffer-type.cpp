@@ -79,3 +79,18 @@ backend_buffer_type_alloc_buffer(struct vn_cs_encoder *enc, struct vn_cs_decoder
 
   return 0;
 }
+
+uint32_t
+backend_buffer_type_get_alloc_size(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
+  UNUSED(ctx);
+  ggml_backend_buffer_type_t buft;
+  buft = vn_decode_ggml_buffer_type(dec);
+
+  const ggml_tensor *op = vn_decode_ggml_tensor_inplace(dec);
+
+  size_t value = buft->iface.get_alloc_size(buft, op);
+
+  vn_encode_size_t(enc, &value);
+
+  return 0;
+}

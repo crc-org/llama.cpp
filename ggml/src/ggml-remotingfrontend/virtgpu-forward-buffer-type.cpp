@@ -117,3 +117,25 @@ apir_buffer_type_alloc_buffer(struct virtgpu *gpu, ggml_backend_buffer_type_t bu
 
   return buffer_context;
 }
+
+size_t
+apir_buffer_type_get_alloc_size(struct virtgpu *gpu, ggml_backend_buffer_type_t buft, const ggml_tensor *op) {
+  struct vn_cs_encoder *encoder;
+  struct vn_cs_decoder *decoder;
+  ApirForwardReturnCode ret;
+
+  REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_GET_ALLOC_SIZE);
+
+  vn_encode_ggml_buffer_type(encoder, buft);
+
+  vn_encode_ggml_tensor_inline(encoder, op);
+
+  REMOTE_CALL(gpu, encoder, decoder, ret);
+
+  size_t alloc_size;
+  vn_decode_size_t(decoder, &alloc_size);
+
+  remote_call_finish(gpu, encoder, decoder);
+
+  return alloc_size;
+}
