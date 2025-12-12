@@ -11,7 +11,7 @@
 struct timer_data graph_compute_timer = {0, 0, 0, "compute_timer"};
 
 uint32_t
-backend_graph_compute(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
+backend_backend_graph_compute(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
   UNUSED(ctx);
   UNUSED(enc);
 

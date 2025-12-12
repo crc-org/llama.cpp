@@ -6,7 +6,18 @@
 #include "ggml-backend-impl.h"
 #include "ggml-backend.h"
 
-uint32_t backend_reg_get_device_count(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
+uint32_t backend_device_get_device_count(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
+  UNUSED(ctx);
+  UNUSED(ctx);
+  UNUSED(dec);
+
+  int32_t dev_count = reg->iface.get_device_count(reg);
+  vn_encode_int32_t(enc, &dev_count);
+
+  return 0;
+}
+
+uint32_t backend_device_get_count(struct vn_cs_encoder *enc, struct vn_cs_decoder *dec, struct virgl_apir_context *ctx) {
   UNUSED(ctx);
   UNUSED(ctx);
   UNUSED(dec);
