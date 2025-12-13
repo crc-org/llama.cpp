@@ -679,7 +679,7 @@ llama_model_loader::llama_model_loader(
             }
         }
 
-        LLAMA_LOG_INFO("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", __func__);
+        //LLAMA_LOG_INFO("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", __func__);
 
         for (int i = 0; i < n_kv; i++) {
             const char * name           = gguf_get_key(meta.get(), i);
@@ -696,7 +696,7 @@ llama_model_loader::llama_model_loader(
             }
             replace_all(value, "\n", "\\n");
 
-            LLAMA_LOG_INFO("%s: - kv %3d: %42s %-16s = %s\n", __func__, i, name, type_name.c_str(), value.c_str());
+            //LLAMA_LOG_INFO("%s: - kv %3d: %42s %-16s = %s\n", __func__, i, name, type_name.c_str(), value.c_str());
         }
 
         // print type counts
@@ -705,7 +705,7 @@ llama_model_loader::llama_model_loader(
                 continue;
             }
 
-            LLAMA_LOG_INFO("%s: - type %4s: %4d tensors\n", __func__, ggml_type_name(kv.first), kv.second);
+            //LLAMA_LOG_INFO("%s: - type %4s: %4d tensors\n", __func__, ggml_type_name(kv.first), kv.second);
         }
     }
 
@@ -790,7 +790,7 @@ const struct ggml_tensor * llama_model_loader::check_tensor_dims(const std::stri
 }
 
 struct ggml_tensor * llama_model_loader::create_tensor(struct ggml_context * ctx, const std::string & name, const std::initializer_list<int64_t> & ne, int flags) {
-    LLAMA_LOG_DEBUG("%s: loading tensor %s\n", __func__, name.c_str());
+    //LLAMA_LOG_DEBUG("%s: loading tensor %s\n", __func__, name.c_str());
     const struct ggml_tensor * cur = check_tensor_dims(name, ne, !(flags & TENSOR_NOT_REQUIRED));
 
     if (cur == NULL) {
@@ -1157,6 +1157,7 @@ std::string llama_model_loader::ftype_name() const {
 }
 
 void llama_model_loader::print_info() const {
+    return;
     LLAMA_LOG_INFO("%s: file format = %s\n", __func__, llama_file_version_name(fver));
     LLAMA_LOG_INFO("%s: file type   = %s\n", __func__, llama_model_ftype_name(ftype).c_str());
     if (n_bytes < GiB) {

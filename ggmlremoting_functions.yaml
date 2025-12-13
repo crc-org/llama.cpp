@@ -1,0 +1,243 @@
+# YAML schema for GGML remoting API functions
+# This defines the structure for generating the remoting layer code
+
+# Configuration for the generated files
+config:
+  # Base path for the generated files
+  base_path: "ggml/src"
+
+  # Header files to update
+  files:
+    apir_backend_header: "ggml-remotingbackend/shared/apir_backend.gen.h"
+    backend_dispatched_header: "ggml-remotingbackend/backend-dispatched.gen.h"
+    virtgpu_forward_header: "ggml-remotingfrontend/virtgpu-forward.gen.h"
+
+# Function groups organized by their logical grouping
+function_groups:
+  device:
+    # Description that appears above the group in generated code
+    group_description: "device"
+    # Functions in this group
+    functions:
+      - name: "get_device_count"
+        enabled: true
+      - name: "get_count"
+        enabled: true
+      - name: "get_name"
+        enabled: true
+      - name: "get_description"
+        enabled: true
+      - name: "get_type"
+        enabled: true
+      - name: "get_memory"
+        enabled: true
+      - name: "supports_op"
+        enabled: true
+      - name: "get_buffer_type"
+        enabled: true
+      - name: "get_props"
+        enabled: true
+      - name: "buffer_from_ptr"
+        enabled: true
+
+  buffer_type:
+    group_description: "buffer-type"
+    functions:
+      - name: "get_name"
+        enabled: true
+      - name: "get_alignment"
+        enabled: true
+      - name: "get_max_size"
+        enabled: true
+      - name: "is_host"
+        enabled: true
+      - name: "alloc_buffer"
+        enabled: true
+      - name: "get_alloc_size"
+        enabled: true
+        # This is a newly added function as seen in the HEAD commit
+        newly_added: true
+
+  buffer:
+    group_description: "buffer"
+    functions:
+      - name: "get_base"
+        enabled: true
+      - name: "set_tensor"
+        enabled: true
+      - name: "get_tensor"
+        enabled: true
+      - name: "cpy_tensor"
+        enabled: true
+      - name: "clear"
+        enabled: true
+      - name: "free_buffer"
+        enabled: true
+
+  backend:
+    group_description: "backend"
+    functions:
+      - name: "graph_compute"
+        enabled: true
+      - name: "graph_optimize"
+        enabled: false
+
+  metal:
+    group_description: "metal"
+    functions:
+      - name: "get_device_context"
+        enabled: true
+
+# Function metadata - describes return types and additional parameters (beyond struct virtgpu *gpu)
+function_metadata:
+  # Device functions
+  device_get_count:
+    frontend_return: "int"
+    frontend_extra_params: []
+
+  device_get_name:
+    frontend_return: "const char *"
+    frontend_extra_params: []
+
+  device_get_description:
+    frontend_return: "const char *"
+    frontend_extra_params: []
+
+  device_get_type:
+    frontend_return: "uint32_t"
+    frontend_extra_params: []
+
+  device_get_memory:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "size_t *free"
+      - "size_t *total"
+
+  device_supports_op:
+    frontend_return: "bool"
+    frontend_extra_params:
+      - "const ggml_tensor *op"
+
+  device_get_buffer_type:
+    frontend_return: "apir_buffer_type_host_handle_t"
+    frontend_extra_params: []
+
+  device_get_props:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "bool *async"
+      - "bool *host_buffer"
+      - "bool *buffer_from_host_ptr"
+      - "bool *events"
+
+  device_buffer_from_ptr:
+    frontend_return: "apir_buffer_context_t"
+    frontend_extra_params:
+      - "size_t size"
+      - "size_t max_tensor_size"
+
+  # Buffer type functions
+  buffer_type_get_name:
+    frontend_return: "const char *"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buft"
+
+  buffer_type_get_alignment:
+    frontend_return: "size_t"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buft"
+
+  buffer_type_get_max_size:
+    frontend_return: "size_t"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buft"
+
+  buffer_type_is_host:
+    frontend_return: "bool"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buft"
+
+  buffer_type_alloc_buffer:
+    frontend_return: "apir_buffer_context_t"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buffer_buft"
+      - "size_t size"
+
+  buffer_type_get_alloc_size:
+    frontend_return: "size_t"
+    frontend_extra_params:
+      - "ggml_backend_buffer_type_t buft"
+      - "const ggml_tensor *op"
+
+  # Buffer functions
+  buffer_get_base:
+    frontend_return: "void *"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+
+  buffer_set_tensor:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+      - "ggml_tensor *tensor"
+      - "const void *data"
+      - "size_t offset"
+      - "size_t size"
+
+  buffer_get_tensor:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+      - "const ggml_tensor *tensor"
+      - "void *data"
+      - "size_t offset"
+      - "size_t size"
+
+  buffer_cpy_tensor:
+    frontend_return: "bool"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+      - "const ggml_tensor *src"
+      - "const ggml_tensor *dst"
+
+  buffer_clear:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+      - "uint8_t value"
+
+  buffer_free_buffer:
+    frontend_return: "void"
+    frontend_extra_params:
+      - "apir_buffer_context_t *buffer_context"
+
+  # Backend functions
+  backend_graph_compute:
+    frontend_return: "ggml_status"
+    frontend_extra_params:
+      - "ggml_cgraph *cgraph"
+
+  backend_graph_optimize:
+    frontend_return: "ggml_cgraph *"
+    frontend_extra_params:
+      - "ggml_cgraph *cgraph"
+
+  # Metal functions
+  metal_get_device_context:
+    frontend_return: "bool"
+    frontend_extra_params:
+      - "struct ggml_backend_metal_device_context *metal_dev_ctx"
+
+# Naming patterns used for code generation
+naming_patterns:
+  # How to generate enum names
+  enum_prefix: "APIR_COMMAND_TYPE_"
+
+  # How to generate backend function names
+  backend_function_prefix: "backend_"
+
+  # How to generate frontend function names
+  frontend_function_prefix: "apir_"
+
+  # Standard frontend first parameter
+  frontend_base_param: "struct virtgpu *gpu"
