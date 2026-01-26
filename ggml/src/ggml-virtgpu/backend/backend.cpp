@@ -1,11 +1,35 @@
 #include "backend-dispatched.h"
 #include "backend-virgl-apir.h"
+#include "backend-dispatched.gen.h"
 
 #include "shared/api_remoting.h"
 #include "shared/apir_backend.h"
 #include "shared/apir_cs.h"
 
+#ifdef _WIN32
+#include <windows.h>
+// Windows compatibility for dlfcn functions
+#define RTLD_LAZY 0
+static inline void* dlopen(const char* filename, int flags) {
+    (void)flags; // unused
+    return LoadLibraryA(filename);
+}
+static inline void* dlsym(void* handle, const char* symbol) {
+    return GetProcAddress((HMODULE)handle, symbol);
+}
+static inline int dlclose(void* handle) {
+    return FreeLibrary((HMODULE)handle) ? 0 : -1;
+}
+static inline const char* dlerror(void) {
+    static char buffer[256];
+    DWORD error = GetLastError();
+    if (error == 0) return NULL;
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, 0, buffer, sizeof(buffer), NULL);
+    return buffer;
+}
+#else
 #include <dlfcn.h>
+#endif
 #include <ggml-backend.h>
 
 #include <iostream>
@@ -69,7 +93,7 @@ ApirLoadLibraryReturnCode apir_backend_initialize(uint32_t virgl_ctx_id, struct 
         }
     }
 
-    const char * library_name = virgl_cbs->get_config(virgl_ctx_id, APIR_GGML_LIBRARY_PATH_KEY);
+    const char * library_name =  virgl_cbs->get_config(virgl_ctx_id, APIR_GGML_LIBRARY_PATH_KEY);
     const char * virgl_library_reg = virgl_cbs->get_config(virgl_ctx_id, APIR_GGML_LIBRARY_REG_KEY);
     const char * library_reg = virgl_library_reg ? virgl_library_reg : GGML_DEFAULT_BACKEND_REG;
 
@@ -82,7 +106,7 @@ ApirLoadLibraryReturnCode apir_backend_initialize(uint32_t virgl_ctx_id, struct 
     backend_library_handle = dlopen(library_name, RTLD_LAZY);
 
     if (!backend_library_handle) {
-        GGML_LOG_ERROR("cannot open the GGML library: %s\n", dlerror());
+        GGML_LOG_ERROR("cannot open the GGML library: %s: %s\n", library_name, dlerror());
 
         return APIR_LOAD_LIBRARY_CANNOT_OPEN;
     }
@@ -139,7 +163,15 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
     }
 
     backend_dispatch_t forward_fct = apir_backend_dispatch_table[cmd_type];
-    uint32_t           ret         = forward_fct(&enc, &dec, &ctx);
+
+    printf("[HOST] ==> %s\n", backend_dispatch_command_name((ApirBackendCommandType)cmd_type));
+
+    // Encode APIR return code first (0 for APIR_FORWARD_SUCCESS)
+    uint32_t apir_return_code = 0;  // APIR_FORWARD_SUCCESS
+    apir_encode_uint32_t(&enc, &apir_return_code);
+
+    // Call backend function to encode actual data
+    uint32_t ret = forward_fct(&enc, &dec, &ctx);
 
     *enc_cur_after = enc.cur;
 

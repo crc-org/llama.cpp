@@ -2,7 +2,12 @@
 
 /* the rest of this file must match virglrenderer/src/apir-protocol.h */
 
+#ifdef _WIN32
+#include <io.h>
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdint>
 
@@ -32,14 +37,15 @@ enum ApirLoadLibraryReturnCode {
 };
 
 enum ApirForwardReturnCode {
-    APIR_FORWARD_SUCCESS         = 0,
-    APIR_FORWARD_NO_DISPATCH_FCT = 1,
-    APIR_FORWARD_TIMEOUT         = 2,
-
-    APIR_FORWARD_BASE_INDEX      = 3,  // anything above this is a APIR backend library forward return code
+    APIR_FORWARD_SUCCESS          = 0,
+    APIR_FORWARD_NO_DISPATCH_FCT  = 1,
+    APIR_FORWARD_TIMEOUT          = 2,
+    APIR_FORWARD_INVALID_ARGUMENT = 3,
+    APIR_FORWARD_HYPERCALL_ERROR  = 4,
+    APIR_FORWARD_BASE_INDEX       = 5,  // anything above this is a APIR backend library forward return code
 } ;
 
-__attribute__((unused)) static inline const char * apir_command_name(ApirCommandType type) {
+static inline const char * apir_command_name(ApirCommandType type) {
     switch (type) {
         case APIR_COMMAND_TYPE_HANDSHAKE:
             return "HandShake";
@@ -52,7 +58,7 @@ __attribute__((unused)) static inline const char * apir_command_name(ApirCommand
     }
 }
 
-__attribute__((unused)) static const char * apir_load_library_error(ApirLoadLibraryReturnCode code) {
+static const char * apir_load_library_error(ApirLoadLibraryReturnCode code) {
 #define APIR_LOAD_LIBRARY_ERROR(code_name) \
     do {                                   \
         if (code == code_name)             \
@@ -72,7 +78,7 @@ __attribute__((unused)) static const char * apir_load_library_error(ApirLoadLibr
 #undef APIR_LOAD_LIBRARY_ERROR
 }
 
-__attribute__((unused)) static const char * apir_forward_error(ApirForwardReturnCode code) {
+static const char * apir_forward_error(ApirForwardReturnCode code) {
 #define APIR_FORWARD_ERROR(code_name) \
     do {                              \
         if (code == code_name)        \
@@ -83,7 +89,8 @@ __attribute__((unused)) static const char * apir_forward_error(ApirForwardReturn
     APIR_FORWARD_ERROR(APIR_FORWARD_NO_DISPATCH_FCT);
     APIR_FORWARD_ERROR(APIR_FORWARD_TIMEOUT);
     APIR_FORWARD_ERROR(APIR_FORWARD_BASE_INDEX);
-
+    APIR_FORWARD_ERROR(APIR_FORWARD_INVALID_ARGUMENT);
+    APIR_FORWARD_ERROR(APIR_FORWARD_HYPERCALL_ERROR);
     return "Unknown APIR_COMMAND_TYPE_FORWARD error";
 
 #undef APIR_FORWARD_ERROR

@@ -1,5 +1,5 @@
 #include "ggml-remoting.h"
-#include "ggml-virtgpu.h"
+#include "../../include/ggml-virtgpu.h"
 
 #include <iostream>
 #include <mutex>
@@ -8,7 +8,7 @@ void ggml_virtgpu_cleanup(virtgpu *gpu);
 
 static virtgpu * apir_initialize() {
     static virtgpu *         gpu          = NULL;
-    static std::atomic<bool> initialized  = false;
+    static bool initialized  = false;
 
     if (initialized) {
         // fast track
@@ -95,7 +95,7 @@ static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
         return;
     }
 
-    static std::atomic<bool> initialized = false;
+    static bool initialized = false;
 
     if (initialized) {
         return; // fast track
@@ -187,6 +187,7 @@ void ggml_virtgpu_cleanup(virtgpu *gpu) {
         free(gpu->cached_buffer_type.name);
         gpu->cached_buffer_type.name = NULL;
     }
-
+#if 0
     mtx_destroy(&gpu->data_shmem_mutex);
+#endif
 }

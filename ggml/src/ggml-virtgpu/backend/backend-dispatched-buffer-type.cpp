@@ -8,10 +8,23 @@
 
 uint32_t backend_buffer_type_get_name(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
-    ggml_backend_buffer_type_t buft;
-    buft = apir_decode_ggml_buffer_type(dec);
 
+    printf("[BUFFER_TYPE] backend_buffer_type_get_name called\n");
+    printf("[BUFFER_TYPE] Global state: reg=%p, dev=%p, bck=%p\n", (void*)reg, (void*)dev, (void*)bck);
+
+    ggml_backend_buffer_type_t buft;
+    printf("[BUFFER_TYPE] Decoding buffer type handle from client...\n");
+    buft = apir_decode_ggml_buffer_type(dec);
+    printf("[BUFFER_TYPE] Decoded buffer type handle: buft=%p\n", (void*)buft);
+
+    if (buft == NULL || (uintptr_t)buft < 0x1000) {
+        printf("[BUFFER_TYPE] ERROR: Invalid buffer type handle detected: %p\n", (void*)buft);
+        return 1;
+    }
+
+    printf("[BUFFER_TYPE] Calling buft->iface.get_name(buft=%p)...\n", (void*)buft);
     const char * string = buft->iface.get_name(buft);
+    printf("[BUFFER_TYPE] get_name returned: %s\n", string ? string : "(NULL)");
 
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);

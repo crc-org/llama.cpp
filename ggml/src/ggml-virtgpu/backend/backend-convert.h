@@ -7,7 +7,10 @@ static inline apir_buffer_host_handle_t ggml_buffer_to_apir_handle(ggml_backend_
     return (apir_buffer_host_handle_t) buffer;
 }
 
+#ifndef GGML_BUFFER_TYPE_TO_APIR_HANDLE_DEFINED
+#define GGML_BUFFER_TYPE_TO_APIR_HANDLE_DEFINED
 static inline apir_buffer_type_host_handle_t ggml_buffer_type_to_apir_handle(ggml_backend_buffer_type_t buft) {
     // in the backend, the buffer handle is the buffer pointer
     return (apir_buffer_type_host_handle_t) buft;
 }
+#endif

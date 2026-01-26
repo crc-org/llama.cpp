@@ -21,10 +21,12 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     bool using_shared_shmem = false;
 
     if (cgraph_size <= gpu->data_shmem.mmap_size) {
+#if 0 // need to add locking on windows
         // Lock mutex before using shared data_shmem buffer
         if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
             GGML_ABORT("Failed to lock data_shmem mutex");
         }
+#endif
         using_shared_shmem = true;
         shmem = &gpu->data_shmem;
     } else if (virtgpu_shmem_create(gpu, cgraph_size, shmem)) {
@@ -49,7 +51,9 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     // Unlock mutex before cleanup
     if (using_shared_shmem) {
+#if 0 // need to add locking on windows
         mtx_unlock(&gpu->data_shmem_mutex);
+#endif
     } else {
         virtgpu_shmem_destroy(gpu, shmem);
     }

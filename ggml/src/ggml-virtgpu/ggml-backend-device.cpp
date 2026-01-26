@@ -72,7 +72,7 @@ static void ggml_backend_remoting_device_get_props(ggml_backend_dev_t dev, ggml_
 ggml_backend_buffer_type_t ggml_backend_remoting_device_get_buffer_type(ggml_backend_dev_t dev) {
     virtgpu * gpu = DEV_TO_GPU(dev);
 
-    static std::atomic<bool> initialized = false;
+    static bool initialized = false;
     static ggml_backend_buffer_type buft;
 
     if (!initialized) {
@@ -95,7 +95,7 @@ ggml_backend_buffer_type_t ggml_backend_remoting_device_get_buffer_type(ggml_bac
 static ggml_backend_buffer_type_t ggml_backend_remoting_device_get_buffer_from_ptr_type(ggml_backend_dev_t dev) {
     virtgpu * gpu = DEV_TO_GPU(dev);
 
-    static std::atomic<bool> initialized = false;
+    static bool initialized = false;
     static ggml_backend_buffer_type buft;
 
     if (!initialized) {

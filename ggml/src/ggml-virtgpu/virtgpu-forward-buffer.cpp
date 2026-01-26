@@ -39,10 +39,12 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
     bool using_shared_shmem = false;
 
     if (size <= gpu->data_shmem.mmap_size) {
+#if 0 // need to add locking on Windows
         // Lock mutex before using shared data_shmem buffer
         if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
             GGML_ABORT("Failed to lock data_shmem mutex");
         }
+#endif
         using_shared_shmem = true;
         shmem = &gpu->data_shmem;
 
@@ -62,7 +64,9 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
 
     // Unlock mutex before cleanup
     if (using_shared_shmem) {
+#if 0 // need to add locking on Windows
         mtx_unlock(&gpu->data_shmem_mutex);
+#endif
     } else {
         virtgpu_shmem_destroy(gpu, shmem);
     }
@@ -90,10 +94,12 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
     bool using_shared_shmem = false;
 
     if (size <= gpu->data_shmem.mmap_size) {
+#if 0 // need to add locking on Windows
         // Lock mutex before using shared data_shmem buffer
         if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
             GGML_ABORT("Failed to lock data_shmem mutex");
         }
+#endif
         using_shared_shmem = true;
         shmem = &gpu->data_shmem;
 
@@ -113,7 +119,9 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
 
     // Unlock mutex before cleanup
     if (using_shared_shmem) {
+#if 0 // need to add locking on Windows
         mtx_unlock(&gpu->data_shmem_mutex);
+#endif
     } else {
         virtgpu_shmem_destroy(gpu, shmem);
     }

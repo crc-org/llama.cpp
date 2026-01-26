@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef GGML_VIRTGPU_USE_WINDOWS
+/* Linux DRM VirtGPU Implementation */
+
 #include "virtgpu-utils.h"
 #include "virtgpu-shm.h"
 #include "virtgpu-apir.h"
@@ -13,7 +16,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <threads.h>
-#include <xf86drm.h>
+//#include <xf86drm.h>
 
 #include <cstring>
 
@@ -111,3 +114,8 @@ uint32_t remote_call(virtgpu *       gpu,
                      long long *     call_duration_ns);
 
 void remote_call_finish(virtgpu * gpu, apir_encoder * enc, apir_decoder * dec);
+
+#else
+/* Windows winApiRmt Implementation - No Linux DRM Dependencies */
+/* Windows backend uses winApiRmt.h and virtgpu-interface.h instead */
+#endif /* !GGML_VIRTGPU_USE_WINDOWS */

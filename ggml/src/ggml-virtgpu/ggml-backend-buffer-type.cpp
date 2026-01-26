@@ -17,7 +17,10 @@ static ggml_backend_buffer_t ggml_backend_remoting_buffer_type_alloc_buffer(ggml
 
     if (buffer_from_host_ptr) {
         context->apir_context = apir_device_buffer_from_ptr(gpu, size, size);
+#ifndef GGML_VIRTGPU_USE_WINDOWS
+#else
         context->base         = context->apir_context.shmem.mmap_ptr;
+#endif
         context->is_from_ptr  = true;
     } else {
         context->apir_context = apir_buffer_type_alloc_buffer(gpu, gpu->cached_buffer_type.host_handle, size);

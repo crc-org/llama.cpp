@@ -1,12 +1,26 @@
 #pragma once
 
-#include "ggml-backend-impl.h"
+#include "../ggml-backend-impl.h"
 #include "ggml-backend.h"
 #include "ggml-impl.h"
+
+#include "backend/shared/apir_backend.h"
+
+#ifndef GGML_VIRTGPU_USE_WINDOWS
 #include "virtgpu.h"
+#else
+#include "virtgpu-interface.h"
+#include "winApiRmt.h"
+#include "ggml-winapi-client.h"
+#include "apir-minimal.h"
+#endif
+
+#include "virtgpu-forward.gen.h"
 
 #include <memory>
 #include <string>
+#include <vector>
+#include <tuple>
 
 // USE_ALWAYS_TRUE_SUPPORTS_OP: 1 is fast, 0 avoid micro-benchmark crashes
 
@@ -30,9 +44,15 @@ struct ggml_backend_remoting_device_context {
     std::string name;
     std::string description;
 
+#ifndef GGML_VIRTGPU_USE_WINDOWS
     std::vector<std::tuple<void *, size_t, virtgpu_shmem *>> shared_memory;
-
     virtgpu * gpu;
+#else
+    // Windows winApiRmt implementation
+    std::vector<std::tuple<void *, size_t, ggml_winapi_shared_buffer_t *>> shared_memory;
+    ggml_winapi_handle_t winapi_handle;
+    virtgpu * gpu;  // Added for compatibility with ggml backend files
+#endif
 };
 
 struct ggml_backend_remoting_buffer_context {
