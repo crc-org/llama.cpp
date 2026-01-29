@@ -171,9 +171,13 @@ void apir_device_get_props(virtgpu * gpu,
     apir_decode_bool_t(decoder, buffer_from_host_ptr);
     apir_decode_bool_t(decoder, events);
 
+    printf("[GUEST] Device props response:\n");
+    printf("[GUEST]   async = %s\n", *async ? "true" : "false");
+    printf("[GUEST]   host_buffer = %s\n", *host_buffer ? "true" : "false");
+    printf("[GUEST]   buffer_from_host_ptr = %s\n", *buffer_from_host_ptr ? "true" : "false");
+    printf("[GUEST]   events = %s\n", *events ? "true" : "false");
+    *buffer_from_host_ptr = true;
     remote_call_finish(gpu, encoder, decoder);
-
-    return;
 }
 
 apir_buffer_context_t apir_device_buffer_from_ptr(virtgpu * gpu, size_t size, size_t max_tensor_size) {
@@ -186,7 +190,11 @@ apir_buffer_context_t apir_device_buffer_from_ptr(virtgpu * gpu, size_t size, si
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_BUFFER_FROM_PTR);
 
     if (virtgpu_shmem_create(gpu, size, &buffer_context.shmem)) {
-        GGML_ABORT("Couldn't allocate the guest-host shared buffer");
+        printf("[ERROR] Couldn't allocate the guest-host shared buffer\n");
+        buffer_context.shmem.res_id = 0;
+        buffer_context.host_handle = 0;
+        buffer_context.buft_host_handle = 0;
+        return buffer_context;
     }
 
     apir_encode_virtgpu_shmem_res_id(encoder, buffer_context.shmem.res_id);

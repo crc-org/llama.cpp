@@ -11,17 +11,17 @@ static ggml_backend_buffer_t ggml_backend_remoting_buffer_type_alloc_buffer(ggml
 
     context->gpu = gpu;
 
-    bool async__unused, host_buffer__unused, events__unused;
-    bool buffer_from_host_ptr;
-    apir_device_get_props(gpu, &async__unused, &host_buffer__unused, &buffer_from_host_ptr, &events__unused);
+    bool async__unused, events__unused;
+    bool buffer_from_host_ptr, host_buffer;
+    apir_device_get_props(gpu, &async__unused, &host_buffer, &buffer_from_host_ptr, &events__unused);
 
-    if (buffer_from_host_ptr) {
+    if (host_buffer || buffer_from_host_ptr) {
         context->apir_context = apir_device_buffer_from_ptr(gpu, size, size);
-#ifndef GGML_VIRTGPU_USE_WINDOWS
-#else
+#ifdef GGML_VIRTGPU_USE_WINDOWS
         context->base         = context->apir_context.shmem.mmap_ptr;
 #endif
         context->is_from_ptr  = true;
+
     } else {
         context->apir_context = apir_buffer_type_alloc_buffer(gpu, gpu->cached_buffer_type.host_handle, size);
         context->is_from_ptr  = false;
@@ -66,8 +66,9 @@ static size_t ggml_backend_remoting_buffer_type_get_alloc_size(ggml_backend_buff
 }
 
 static bool ggml_backend_remoting_buffer_type_is_host(ggml_backend_buffer_type_t buft) {
-    GGML_UNUSED(buft);
+    // Check if this buffer type is the from_ptr type (which creates directly accessible buffers)
     return true;
+    return &buft->iface == &ggml_backend_remoting_buffer_from_ptr_type_interface;
 }
 
 const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_type_interface = {
