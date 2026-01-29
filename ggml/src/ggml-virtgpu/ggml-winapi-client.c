@@ -76,7 +76,8 @@ static int winapi_connect_tcp(const char* host, int port) {
         return -1;
     }
 
-    struct sockaddr_in server_addr = {0};
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
 
@@ -183,7 +184,9 @@ ggml_winapi_handle_t ggml_winapi_init(void) {
 
     /* Set up shared memory base path */
     const char* shared_base = getenv("WINAPI_SHARED_BASE");
-    if (!shared_base) shared_base = WINAPI_SHARED_MEMORY_BASE;
+    if (!shared_base) {
+        shared_base = WINAPI_SHARED_MEMORY_BASE;
+    }
     strncpy(ctx->shared_memory_base, shared_base, sizeof(ctx->shared_memory_base) - 1);
 
     ctx->next_buffer_id = 1;
@@ -194,7 +197,9 @@ ggml_winapi_handle_t ggml_winapi_init(void) {
 
 /* Cleanup connection */
 void ggml_winapi_cleanup(ggml_winapi_handle_t handle) {
-    if (!handle) return;
+    if (!handle) {
+        return;
+    }
 
     ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
 
@@ -267,7 +272,9 @@ int ggml_winapi_alloc_shared_buffer(ggml_winapi_handle_t handle,
 
 /* Free shared memory buffer */
 void ggml_winapi_free_shared_buffer(ggml_winapi_shared_buffer_t *buffer) {
-    if (!buffer) return;
+    if (!buffer) {
+        return;
+    }
 
     if (buffer->data && buffer->data != MAP_FAILED) {
         munmap(buffer->data, buffer->size);
@@ -367,7 +374,9 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     char* status_ptr = strstr(response_json, "\"status\":");
     if (status_ptr) {
         status_ptr += 9; /* skip "status": */
-        while (*status_ptr == ' ' || *status_ptr == '\t') status_ptr++; /* skip whitespace */
+        while (*status_ptr == ' ' || *status_ptr == '\t') {
+            status_ptr++; /* skip whitespace */
+        }
         if (*status_ptr == '"') {
             status_ptr++;
             char* status_end = strchr(status_ptr, '"');
@@ -396,7 +405,9 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     char* file_path_ptr = strstr(response_json, "\"response_file_path\":");
     if (file_path_ptr) {
         file_path_ptr += 21; /* skip "response_file_path": */
-        while (*file_path_ptr == ' ' || *file_path_ptr == '\t') file_path_ptr++; /* skip whitespace */
+        while (*file_path_ptr == ' ' || *file_path_ptr == '\t') {
+            file_path_ptr++; /* skip whitespace */
+        }
         if (*file_path_ptr == '"') {
             file_path_ptr++;
             char* file_path_end = strchr(file_path_ptr, '"');
@@ -430,6 +441,7 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                 }
             } else {
                 fprintf(stderr, "ggml-winapi: Failed to open response file: %s\n", response_file_path);
+                perror("ggml-winapi: open() error");
                 *response_size = 0;
                 ret = GGML_WINAPI_ERROR_SEND_FAILED;
             }
