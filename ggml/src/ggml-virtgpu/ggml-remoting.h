@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdio.h>
 #include "../ggml-backend-impl.h"
 #include "ggml-backend.h"
 #include "ggml-impl.h"
@@ -76,8 +77,7 @@ ggml_backend_t             ggml_backend_remoting_device_init(ggml_backend_dev_t 
 ggml_backend_buffer_type_t ggml_backend_remoting_device_get_buffer_type(ggml_backend_dev_t dev);
 
 static inline apir_buffer_type_host_handle_t ggml_buffer_type_to_apir_handle(ggml_backend_buffer_type_t buft) {
-    // in the backend, the buffer handle is the buffer pointer
-    return (apir_buffer_type_host_handle_t) buft->context;
+    return (apir_buffer_type_host_handle_t) buft;
 }
 
 static inline apir_buffer_host_handle_t ggml_buffer_to_apir_handle(ggml_backend_buffer_t buffer) {

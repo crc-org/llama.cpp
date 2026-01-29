@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "ggml-impl.h"
 #include "apir_cs.h"
 #include "apir_cs_rpc.h"
@@ -71,9 +72,7 @@ static inline void apir_encode_ggml_buffer_type(apir_encoder * enc, ggml_backend
 
 static inline ggml_backend_buffer_type_t apir_decode_ggml_buffer_type(apir_decoder * dec) {
     apir_buffer_type_host_handle_t handle;
-
     apir_decoder_read(dec, sizeof(handle), &handle, sizeof(handle));
-
     return (ggml_backend_buffer_type_t) handle;
 }
 
@@ -83,9 +82,7 @@ static inline void apir_encode_apir_buffer_type_host_handle(apir_encoder * enc, 
 
 static inline apir_buffer_type_host_handle_t apir_decode_apir_buffer_type_host_handle(apir_decoder * dec) {
     apir_buffer_type_host_handle_t handle;
-
     apir_decoder_read(dec, sizeof(handle), &handle, sizeof(handle));
-
     return handle;
 }
 

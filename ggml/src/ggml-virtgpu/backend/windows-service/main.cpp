@@ -1084,12 +1084,6 @@ DWORD HandleClient(SOCKET client_socket)
         request_buffer[msg_len] = '\0';
         request_count++;
 
-        // Add debugging
-        int max_bytes = (msg_len < 20) ? msg_len : 20;
-        for (int i = 0; i < max_bytes; i++) {
-            printf("%02X ", (unsigned char)request_buffer[i]);
-        }
-        printf("\n");
 
         // Process request
         DWORD result;
@@ -1714,7 +1708,6 @@ DWORD HandleSharedBufferAPI(SOCKET client_socket, const Json::Value& request, Js
         std::replace(windows_path.begin(), windows_path.end(), '/', '\\');
     }
 
-    printf("Windows path: %s\n", windows_path.c_str());
 
     // For now, just simulate processing (no-op as requested)
     if (operation == "process") {
@@ -1814,8 +1807,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     // Check if shared_file_path exists in JSON before attempting string conversion
     if (!request.isMember("shared_file_path") || request["shared_file_path"].isNull()) {
         printf("[ERROR] Missing or null shared_file_path in APIR request\n");
-        printf("APIR request: session=%u, cmd_type=%u, size=%I64u bytes, file=<MISSING>, buffer_id=%u\n",
-               session_id, cmd_type, apir_data_size, buffer_id);
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -1835,8 +1826,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         return ERROR_INVALID_PARAMETER;
     }
 
-    printf("APIR request: session=%u, cmd_type=%u, size=%I64u bytes, file='%s', buffer_id=%u\n",
-           session_id, cmd_type, apir_data_size, shared_file_path_cstr, buffer_id);
 
     // Convert Linux path to Windows path using C-style strings only
     char windows_path[512];
@@ -1851,7 +1840,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         windows_path[sizeof(windows_path) - 1] = '\0';
     }
 
-    printf("Windows path: %s\n", windows_path);
 
     // Map the shared memory file
     HANDLE file_handle = CreateFileA(windows_path,

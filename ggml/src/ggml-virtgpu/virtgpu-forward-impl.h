@@ -46,7 +46,9 @@ static inline const char * frontend_command_name(int cmd_type) {
         int32_t forward_flag = (int32_t) apir_command_type__;                                              \
         encoder_name         = remote_call_prepare(gpu_dev_name, APIR_COMMAND_TYPE_FORWARD, forward_flag); \
         if (!encoder_name) {                                                                               \
-            GGML_ABORT("%s: failed to prepare the remote call encoder", __func__);                       \
+            printf("FATAL: %s: failed to prepare the remote call encoder\n", __func__);                 \
+            fflush(stdout);                                                                              \
+            exit(1);                                                                                     \
         }                                                                                                  \
     } while (0)
 
@@ -54,11 +56,15 @@ static inline const char * frontend_command_name(int cmd_type) {
     do {                                                                                                          \
         ret_name = (ApirForwardReturnCode) remote_call(gpu_dev_name, encoder_name, &decoder_name, 0, NULL);       \
         if (!decoder_name) {                                                                                      \
-            GGML_ABORT("%s: failed to kick the remote call", __func__);                                         \
+            printf("FATAL: %s: failed to kick the remote call\n", __func__);                                   \
+            fflush(stdout);                                                                                      \
+            exit(1);                                                                                             \
         }                                                                                                         \
         if (ret_name < APIR_FORWARD_BASE_INDEX) {                                                                 \
-            GGML_ABORT("%s: failed to forward the API call: %s: code %d", __func__,                             \
-                       apir_forward_error(ret_name), ret_name);                                                   \
+            printf("FATAL: %s: failed to forward the API call: %s: code %d\n", __func__,                       \
+                   apir_forward_error(ret_name), ret_name);                                                       \
+            fflush(stdout);                                                                                        \
+            exit(1);                                                                                               \
         }                                                                                                         \
         ret_name = (ApirForwardReturnCode) (ret_name - APIR_FORWARD_BASE_INDEX);                                  \
     } while (0)

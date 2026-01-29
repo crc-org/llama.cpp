@@ -4,10 +4,7 @@ char * apir_buffer_type_get_name(virtgpu * gpu, apir_buffer_type_host_handle_t h
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
-
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_TYPE_GET_NAME);
-
-    printf("[CLIENT] Encoding buffer type as ggml_buffer_type: %p\n", (void*)host_handle);
 
     apir_encode_apir_buffer_type_host_handle(encoder, host_handle);
 

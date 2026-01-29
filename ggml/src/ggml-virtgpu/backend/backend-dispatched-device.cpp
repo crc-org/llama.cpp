@@ -22,17 +22,12 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
-    printf("[BACKEND] backend_device_get_count called\n");
-    printf("[BACKEND] Global state: reg=%p, dev=%p\n", (void*)reg, (void*)dev);
-
     if (reg == NULL) {
-        printf("[BACKEND] ERROR: reg is NULL - backend not initialized!\n");
         return 1;
     }
 
     int32_t dev_count = reg->iface.get_device_count(reg);
     apir_encode_int32_t(enc, &dev_count);
-    printf("[BACKEND] RETURN dev_count --> %d\n\n", dev_count);
 
     return 0;
 }
@@ -102,22 +97,15 @@ uint32_t backend_device_get_buffer_type(apir_encoder * enc, apir_decoder * dec, 
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
-    printf("[BACKEND] Global state: reg=%p, dev=%p\n", (void*)reg, (void*)dev);
-
     if (reg == NULL) {
-        printf("[BACKEND] ERROR: reg is NULL - backend not initialized!\n");
         return 1;
     }
 
     if (dev == NULL) {
-        printf("[BACKEND] ERROR: dev is NULL - device not available!\n");
         return 1;
     }
 
-    printf("[BACKEND] Calling dev->iface.get_buffer_type(dev=%p)\n", (void*)dev);
     ggml_backend_buffer_type_t bufft = dev->iface.get_buffer_type(dev);
-    printf("[BACKEND] get_buffer_type returned: %p\n", (void*)bufft);
-
     apir_encode_ggml_buffer_type(enc, bufft);
 
     return 0;

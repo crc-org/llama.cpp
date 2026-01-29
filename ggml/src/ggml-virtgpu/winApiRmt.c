@@ -213,6 +213,7 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
 
+
     /* Calculate call duration */
     if (call_duration_ns) {
         *call_duration_ns = get_time_ns() - start_time;

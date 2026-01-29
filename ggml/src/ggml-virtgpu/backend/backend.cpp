@@ -152,6 +152,7 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
         .fatal = false,
     };
 
+
     virgl_apir_context ctx = {
         .ctx_id = virgl_ctx_id,
         .iface = virgl_cbs,
@@ -164,7 +165,6 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
 
     backend_dispatch_t forward_fct = apir_backend_dispatch_table[cmd_type];
 
-    printf("[HOST] ==> %s\n", backend_dispatch_command_name((ApirBackendCommandType)cmd_type));
 
     // Encode APIR return code first (0 for APIR_FORWARD_SUCCESS)
     uint32_t apir_return_code = 0;  // APIR_FORWARD_SUCCESS
