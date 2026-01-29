@@ -316,7 +316,24 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     }
 
     /* Copy APIR data into shared buffer */
+    printf("[CLIENT_DEBUG] Writing to shared memory file:\n");
+    printf("[CLIENT_DEBUG]   file_path: %s\n", apir_buffer.file_path);
+    printf("[CLIENT_DEBUG]   apir_size: %zu bytes\n", apir_size);
+    printf("[CLIENT_DEBUG]   source data (first 16 bytes): ");
+    for (size_t i = 0; i < (apir_size < 16 ? apir_size : 16); i++) {
+        printf("%02x ", ((uint8_t*)apir_data)[i]);
+    }
+    printf("\n");
+
     memcpy(apir_buffer.data, apir_data, apir_size);
+
+    printf("[CLIENT_DEBUG] Data written to shared buffer:\n");
+    printf("[CLIENT_DEBUG]   buffer address: %p\n", apir_buffer.data);
+    printf("[CLIENT_DEBUG]   buffer contents (first 16 bytes): ");
+    for (size_t i = 0; i < (apir_size < 16 ? apir_size : 16); i++) {
+        printf("%02x ", ((uint8_t*)apir_buffer.data)[i]);
+    }
+    printf("\n");
 
     /* Force sync memory-mapped data to disk before Windows service reads it */
     if (msync(apir_buffer.data, apir_size, MS_SYNC) != 0) {

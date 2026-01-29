@@ -143,14 +143,32 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
         return NULL;
     }
 
-    /* Use the data shmem buffer for encoding */
-    void* buffer_ptr = virtgpu_shmem_get_ptr(&gpu->data_shmem);
-    size_t buffer_size = gpu->data_shmem.mmap_size;
+    /* Use the dedicated shared command buffer to avoid collision with data buffer */
+    void* buffer_ptr = virtgpu_shmem_get_ptr(&gpu->command_shmem);
+    size_t buffer_size = gpu->command_shmem.mmap_size;
 
     if (!buffer_ptr || buffer_size == 0) {
         GGML_LOG_ERROR("Invalid data buffer in remote_call_prepare\n");
         return NULL;
     }
+
+    /* Clear the shared command buffer before use to avoid garbage data */
+    printf("[CLIENT_DEBUG] Clearing shared command buffer before encoding:\n");
+    printf("[CLIENT_DEBUG]   command_buffer_ptr: %p, size: %zu\n", buffer_ptr, buffer_size);
+
+    printf("[CLIENT_DEBUG] Buffer before clearing (first 16 bytes): ");
+    for (size_t i = 0; i < 16; i++) {
+        printf("%02x ", ((uint8_t*)buffer_ptr)[i]);
+    }
+    printf("\n");
+
+    memset(buffer_ptr, 0, buffer_size);
+
+    printf("[CLIENT_DEBUG] Buffer after clearing (first 16 bytes): ");
+    for (size_t i = 0; i < 16; i++) {
+        printf("%02x ", ((uint8_t*)buffer_ptr)[i]);
+    }
+    printf("\n");
 
     /* Create APIR encoder using winApiRmt shared buffer */
     struct apir_encoder* encoder = apir_encoder_init(buffer_ptr, buffer_size);
@@ -160,8 +178,24 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
     }
 
     /* Encode the command type and flags - same protocol as Linux version */
+    printf("[CLIENT_DEBUG] Encoding command header:\n");
+    printf("[CLIENT_DEBUG]   apir_cmd_type: %d (0x%x)\n", apir_cmd_type, apir_cmd_type);
+    printf("[CLIENT_DEBUG]   cmd_flags: %d (0x%x)\n", cmd_flags, cmd_flags);
+
     apir_encode_uint32_t(encoder, (uint32_t*)&apir_cmd_type);
+    printf("[CLIENT_DEBUG] After encoding cmd_type, buffer: ");
+    for (size_t i = 0; i < 8; i++) {
+        printf("%02x ", ((uint8_t*)encoder->start)[i]);
+    }
+    printf("\n");
+
     apir_encode_int32_t(encoder, &cmd_flags);
+    printf("[CLIENT_DEBUG] After encoding cmd_flags, buffer: ");
+    for (size_t i = 0; i < 8; i++) {
+        printf("%02x ", ((uint8_t*)encoder->start)[i]);
+    }
+    printf("\n");
+
     return encoder;
 }
 
@@ -177,6 +211,15 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
     /* Get encoded data size and validate */
     size_t encoded_size = apir_encoder_get_encoded_size(enc);
 
+    printf("[CLIENT_DEBUG] Client sending command data:\n");
+    printf("[CLIENT_DEBUG]   encoded_size: %zu bytes\n", encoded_size);
+    printf("[CLIENT_DEBUG]   command_buffer_size: %zu bytes\n", gpu->command_shmem.mmap_size);
+    printf("[CLIENT_DEBUG]   encoder state: start=%p, cur=%p, end=%p\n", enc->start, enc->cur, enc->end);
+    printf("[CLIENT_DEBUG]   encoded data (first 16 bytes): ");
+    for (size_t i = 0; i < (encoded_size < 16 ? encoded_size : 16); i++) {
+        printf("%02x ", ((uint8_t*)enc->start)[i]);
+    }
+    printf("\n");
 
     if (encoded_size > gpu->data_shmem.mmap_size) {
         GGML_LOG_ERROR("Encoded data size %zu exceeds buffer size %zu\n",

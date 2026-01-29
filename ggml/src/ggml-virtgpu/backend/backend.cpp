@@ -139,6 +139,16 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
                                  char *                 enc_cur,
                                  const char *           enc_end,
                                  char **                enc_cur_after) {
+    printf("[BACKEND_DEBUG] apir_backend_dispatcher called:\n");
+    printf("[BACKEND_DEBUG]   cmd_type: %u (0x%x)\n", cmd_type, cmd_type);
+    printf("[BACKEND_DEBUG]   APIR_BACKEND_DISPATCH_TABLE_COUNT: %d\n", APIR_BACKEND_DISPATCH_TABLE_COUNT);
+    printf("[BACKEND_DEBUG]   dec_cur: %p, dec_end: %p\n", (void*)dec_cur, (void*)dec_end);
+    printf("[BACKEND_DEBUG]   decoder buffer size: %td bytes\n", dec_end - dec_cur);
+    printf("[BACKEND_DEBUG]   decoder buffer (first 16 bytes): ");
+    for (int i = 0; i < 16 && dec_cur + i < dec_end; i++) {
+        printf("%02x ", ((uint8_t*)dec_cur)[i]);
+    }
+    printf("\n");
     apir_encoder enc = {
         .cur   = enc_cur,
         .start = enc_cur,
