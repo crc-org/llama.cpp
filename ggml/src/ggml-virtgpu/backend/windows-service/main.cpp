@@ -15,6 +15,7 @@
 #include <ws2tcpip.h>
 #include <hvsocket.h>
 #include <guiddef.h>
+#include <dbghelp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,8 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
+
+#pragma comment(lib, "dbghelp.lib")
 
 // Define INET_ADDRSTRLEN if not available
 #ifndef INET_ADDRSTRLEN
@@ -56,6 +59,7 @@ extern "C" {
                                                       const char *           enc_end,
                                                       char **                enc_cur_after);
 }
+
 
 // AF_VSOCK definition for Windows (may not be available on all versions)
 #ifndef AF_VSOCK
@@ -359,6 +363,55 @@ LONG WINAPI WindowsExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
                access_type == 0 ? "Read" : (access_type == 1 ? "Write" : "Execute"),
                (void*)address);
     }
+
+    // Add stack trace for better debugging
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+
+    SymInitialize(process, NULL, TRUE);
+
+    CONTEXT* context = ExceptionInfo->ContextRecord;
+    STACKFRAME64 stackFrame = {};
+
+#ifdef _M_X64
+    stackFrame.AddrPC.Offset = context->Rip;
+    stackFrame.AddrPC.Mode = AddrModeFlat;
+    stackFrame.AddrFrame.Offset = context->Rbp;
+    stackFrame.AddrFrame.Mode = AddrModeFlat;
+    stackFrame.AddrStack.Offset = context->Rsp;
+    stackFrame.AddrStack.Mode = AddrModeFlat;
+    DWORD machineType = IMAGE_FILE_MACHINE_AMD64;
+#else
+    stackFrame.AddrPC.Offset = context->Eip;
+    stackFrame.AddrPC.Mode = AddrModeFlat;
+    stackFrame.AddrFrame.Offset = context->Ebp;
+    stackFrame.AddrFrame.Mode = AddrModeFlat;
+    stackFrame.AddrStack.Offset = context->Esp;
+    stackFrame.AddrStack.Mode = AddrModeFlat;
+    DWORD machineType = IMAGE_FILE_MACHINE_I386;
+#endif
+
+    printf("\n=== STACK TRACE ===\n");
+
+    for (int i = 0; i < 20; i++) {
+        if (!StackWalk64(machineType, process, thread, &stackFrame, context, NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+            break;
+        }
+
+        char symbolBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
+        SYMBOL_INFO* symbol = (SYMBOL_INFO*)symbolBuffer;
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen = MAX_SYM_NAME;
+
+        DWORD64 displacement = 0;
+        if (SymFromAddr(process, stackFrame.AddrPC.Offset, &displacement, symbol)) {
+            printf("[%d] %s + 0x%llx (0x%llx)\n", i, symbol->Name, displacement, stackFrame.AddrPC.Offset);
+        } else {
+            printf("[%d] <unknown> (0x%llx)\n", i, stackFrame.AddrPC.Offset);
+        }
+    }
+
+    printf("==================\n");
 
     printf("Server is terminating due to exception...\n");
     fflush(stdout);
