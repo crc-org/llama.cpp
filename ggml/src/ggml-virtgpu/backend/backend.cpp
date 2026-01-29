@@ -165,7 +165,6 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
 
     backend_dispatch_t forward_fct = apir_backend_dispatch_table[cmd_type];
 
-
     // Encode APIR return code first (0 for APIR_FORWARD_SUCCESS)
     uint32_t apir_return_code = 0;  // APIR_FORWARD_SUCCESS
     apir_encode_uint32_t(&enc, &apir_return_code);

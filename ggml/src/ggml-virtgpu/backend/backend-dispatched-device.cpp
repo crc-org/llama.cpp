@@ -118,10 +118,19 @@ uint32_t backend_device_get_props(apir_encoder * enc, apir_decoder * dec, virgl_
     ggml_backend_dev_props props;
     dev->iface.get_props(dev, &props);
 
+    printf("[BACKEND_DISPATCHER] CPU backend returned:\n");
+    printf("[BACKEND_DISPATCHER]   async = %s\n", props.caps.async ? "true" : "false");
+    printf("[BACKEND_DISPATCHER]   host_buffer = %s\n", props.caps.host_buffer ? "true" : "false");
+    printf("[BACKEND_DISPATCHER]   buffer_from_host_ptr = %s\n", props.caps.buffer_from_host_ptr ? "true" : "false");
+    printf("[BACKEND_DISPATCHER]   events = %s\n", props.caps.events ? "true" : "false");
+
     apir_encode_bool_t(enc, &props.caps.async);
     apir_encode_bool_t(enc, &props.caps.host_buffer);
     apir_encode_bool_t(enc, &props.caps.buffer_from_host_ptr);
     apir_encode_bool_t(enc, &props.caps.events);
+
+    printf("[BACKEND_DISPATCHER] Values encoded to response\n");
+    fflush(stdout);
 
     return 0;
 }

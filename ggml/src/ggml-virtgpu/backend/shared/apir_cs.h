@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 
 #ifdef _MSC_VER
 #define likely(x)   (x)

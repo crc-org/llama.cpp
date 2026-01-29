@@ -1937,14 +1937,14 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         &enc_cur_after                     // Output position after encoding
     );
 
-
     // Avoid Json::Value objects completely - return success code for manual JSON handling
 
     if (dispatch_result == 0) {
-        // Success (APIR_FORWARD_SUCCESS = 0) - write response data to shared memory file
+        // Success (APIR_FORWARD_SUCCESS = 0) - write response data back to shared memory
         size_t response_data_size = enc_cur_after - response_buffer;
 
         if (response_data_size > 0) {
+            // Write all responses to files since "the file IS the shared memory" in this architecture
             // Create response file path using C-style strings
             char response_file_path[512];
             strncpy(response_file_path, windows_path, sizeof(response_file_path) - 20);  // Leave space for suffix
