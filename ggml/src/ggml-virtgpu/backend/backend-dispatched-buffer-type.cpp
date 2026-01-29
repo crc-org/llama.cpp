@@ -29,9 +29,16 @@ uint32_t backend_buffer_type_get_alignment(apir_encoder * enc, apir_decoder * de
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
 
-    size_t value = buft->iface.get_alignment(buft);
-    apir_encode_size_t(enc, &value);
+    if (!buft) {
+        printf("[ERROR] backend_buffer_type_get_alignment: buft is NULL\n");
+        return 1; // Return error code
+    }
 
+    size_t value = 0;
+    if (buft->iface.get_alignment) {
+        value = buft->iface.get_alignment(buft);
+    }
+    apir_encode_size_t(enc, &value);
     return 0;
 }
 
@@ -39,6 +46,11 @@ uint32_t backend_buffer_type_get_max_size(apir_encoder * enc, apir_decoder * dec
     GGML_UNUSED(ctx);
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
+
+    if (!buft) {
+        printf("[ERROR] backend_buffer_type_get_max_size: buft is NULL\n");
+        return 1; // Return error code
+    }
 
     size_t value = SIZE_MAX;
     if (buft->iface.get_max_size) {

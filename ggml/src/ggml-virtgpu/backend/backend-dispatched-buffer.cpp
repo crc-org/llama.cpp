@@ -11,6 +11,16 @@ uint32_t backend_buffer_get_base(apir_encoder * enc, apir_decoder * dec, virgl_a
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
 
+    if (!buffer) {
+        printf("[ERROR] backend_buffer_get_base: buffer is NULL\n");
+        return 1;
+    }
+
+    if (!buffer->iface.get_base) {
+        printf("[ERROR] backend_buffer_get_base: buffer->iface.get_base is NULL\n");
+        return 1;
+    }
+
     uintptr_t base = (uintptr_t) buffer->iface.get_base(buffer);
     apir_encode_uintptr_t(enc, &base);
 
@@ -23,6 +33,16 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
 
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
+
+    if (!buffer) {
+        printf("[ERROR] backend_buffer_set_tensor: buffer is NULL\n");
+        return 1;
+    }
+
+    if (!buffer->iface.set_tensor) {
+        printf("[ERROR] backend_buffer_set_tensor: buffer->iface.set_tensor is NULL\n");
+        return 1;
+    }
 
     ggml_tensor * tensor;
     // safe to remove the const qualifier here
@@ -105,6 +125,16 @@ uint32_t backend_buffer_clear(apir_encoder * enc, apir_decoder * dec, virgl_apir
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
 
+    if (!buffer) {
+        printf("[ERROR] backend_buffer_clear: buffer is NULL\n");
+        return 1;
+    }
+
+    if (!buffer->iface.clear) {
+        printf("[ERROR] backend_buffer_clear: buffer->iface.clear is NULL\n");
+        return 1;
+    }
+
     uint8_t value;
     apir_decode_uint8_t(dec, &value);
 
@@ -120,12 +150,22 @@ uint32_t backend_buffer_free_buffer(apir_encoder * enc, apir_decoder * dec, virg
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
 
+    if (!buffer) {
+        printf("[ERROR] backend_buffer_free_buffer: buffer is NULL - aborting\n");
+        return 1;
+    }
+
+
+    // if buffer is not owned, no need to free it
+    if (buffer->iface.free_buffer) {
+        buffer->iface.free_buffer(buffer);
+    }
+
     if (!apir_untrack_backend_buffer(buffer)) {
         GGML_LOG_WARN("%s: unknown buffer %p\n", __func__, (void *) buffer);
         return 1;
     }
 
-    buffer->iface.free_buffer(buffer);
 
     return 0;
 }
