@@ -187,7 +187,5 @@ void ggml_virtgpu_cleanup(virtgpu *gpu) {
         free(gpu->cached_buffer_type.name);
         gpu->cached_buffer_type.name = NULL;
     }
-#if 0
     mtx_destroy(&gpu->data_shmem_mutex);
-#endif
 }

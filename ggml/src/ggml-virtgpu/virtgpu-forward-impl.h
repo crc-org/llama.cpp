@@ -1,5 +1,6 @@
 #ifdef GGML_VIRTGPU_USE_WINDOWS
 #include "virtgpu-interface.h"
+#include <threads.h>  // For mtx_t, mtx_lock, mtx_unlock
 #else
 #include "virtgpu.h"
 #endif

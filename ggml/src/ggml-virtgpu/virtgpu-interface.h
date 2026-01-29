@@ -15,6 +15,7 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <threads.h>
 
 /* Forward declarations */
 struct ggml_cgraph;
@@ -92,6 +93,9 @@ struct virtgpu {
 
     /* Utility arrays */
     util_sparse_array shmem_array;
+
+    /* Shared buffer synchronization */
+    mtx_t data_shmem_mutex;
 
     /* Backend-specific data (opaque pointer) */
     void* backend_data;
