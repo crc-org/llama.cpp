@@ -4,9 +4,19 @@
 
 #include <cassert>
 #include <cstring>
+#include <cstdint>
+#include <cstdlib>
 
+#ifdef _MSC_VER
+#define likely(x)   (x)
+#define unlikely(x) (x)
+#define mul_overflow_check(a, b, result) \
+    ((a) != 0 && (SIZE_MAX / (a)) < (b) ? (*(result) = SIZE_MAX, true) : (*(result) = (a) * (b), false))
+#else
 #define likely(x)   __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
+#define mul_overflow_check(a, b, result) __builtin_mul_overflow(a, b, result)
+#endif
 
 struct apir_encoder {
     char *       cur;
@@ -331,7 +341,7 @@ static inline void apir_decode_char_array(apir_decoder * dec, char * val, size_t
 
 static inline void * apir_decoder_alloc_array(size_t size, size_t count) {
     size_t alloc_size;
-    if (unlikely(__builtin_mul_overflow(size, count, &alloc_size))) {
+    if (unlikely(mul_overflow_check(size, count, &alloc_size))) {
         GGML_LOG_ERROR("overflow in array allocation of %zu * %zu bytes\n", size, count);
         return NULL;
     }

@@ -1,8 +1,15 @@
 #include "virtgpu-forward-impl.h"
+#ifndef GGML_VIRTGPU_USE_WINDOWS
 #include "virtgpu-shm.h"
+#endif
 
 int apir_device_get_count(virtgpu * gpu) {
+
     static int32_t dev_count = -1;
+
+    // Reset cache for debugging - remove this later
+    dev_count = -1;
+
     if (dev_count != -1) {
         return dev_count;
     }
@@ -21,11 +28,7 @@ int apir_device_get_count(virtgpu * gpu) {
     return dev_count;
 }
 
-const char * apir_device_get_name(virtgpu * gpu) {
-    static char * string = nullptr;
-    if (string) {
-        return string;
-    }
+char * apir_device_get_name(virtgpu * gpu) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -34,9 +37,9 @@ const char * apir_device_get_name(virtgpu * gpu) {
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
-    string                   = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
+    char            * string = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
     if (!string) {
-        GGML_LOG_ERROR("%s: Could not allocate the device name buffer\n", __func__);
+        printf("%s: Could not allocate the device name buffer\n", __func__);
         return NULL;
     }
     apir_decode_char_array(decoder, string, string_size);
@@ -46,7 +49,7 @@ const char * apir_device_get_name(virtgpu * gpu) {
     return string;
 }
 
-const char * apir_device_get_description(virtgpu * gpu) {
+char * apir_device_get_description(virtgpu * gpu) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -58,7 +61,7 @@ const char * apir_device_get_description(virtgpu * gpu) {
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
     char *       string      = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
     if (!string) {
-        GGML_LOG_ERROR("%s: Could not allocate the device description buffer\n", __func__);
+        printf("%s: Could not allocate the device description buffer\n", __func__);
 
         return NULL;
     }
@@ -132,6 +135,7 @@ bool apir_device_supports_op(virtgpu * gpu, const ggml_tensor * op) {
 }
 
 apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
+
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -140,8 +144,9 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    apir_buffer_type_host_handle_t buft_handle;
-    apir_decode_apir_buffer_type_host_handle_t(decoder, &buft_handle);
+    ggml_backend_buffer_type_t buft = apir_decode_ggml_buffer_type(decoder);
+
+    apir_buffer_type_host_handle_t buft_handle = (apir_buffer_type_host_handle_t)buft;
 
     remote_call_finish(gpu, encoder, decoder);
 

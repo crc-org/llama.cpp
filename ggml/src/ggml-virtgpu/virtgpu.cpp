@@ -149,6 +149,13 @@ virtgpu * create_virtgpu() {
     gpu->use_apir_capset = getenv("GGML_REMOTING_USE_APIR_CAPSET") != nullptr;
     util_sparse_array_init(&gpu->shmem_array, sizeof(virtgpu_shmem), 1024);
 
+    // Initialize mutex to protect shared data_shmem buffer
+    if (mtx_init(&gpu->data_shmem_mutex, mtx_plain) != thrd_success) {
+        delete gpu;
+        GGML_ABORT("%s: failed to initialize data_shmem mutex", __func__);
+        return NULL;
+    }
+
     if (virtgpu_open(gpu) != APIR_SUCCESS) {
         GGML_ABORT("%s: failed to open the virtgpu device", __func__);
         return NULL;
@@ -333,9 +340,9 @@ apir_encoder * remote_call_prepare(virtgpu * gpu, ApirCommandType apir_cmd_type,
      * Prepare the command encoder and its buffer
      */
 
-    static char encoder_buffer[4096];
+    thread_local char encoder_buffer[4096];
 
-    static apir_encoder enc;
+    thread_local apir_encoder enc;
     enc = {
         .cur   = encoder_buffer,
         .start = encoder_buffer,

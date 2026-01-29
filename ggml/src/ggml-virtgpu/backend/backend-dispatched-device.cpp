@@ -22,6 +22,10 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
+    if (reg == NULL) {
+        return 1;
+    }
+
     int32_t dev_count = reg->iface.get_device_count(reg);
     apir_encode_int32_t(enc, &dev_count);
 
@@ -93,8 +97,15 @@ uint32_t backend_device_get_buffer_type(apir_encoder * enc, apir_decoder * dec, 
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
-    ggml_backend_buffer_type_t bufft = dev->iface.get_buffer_type(dev);
+    if (reg == NULL) {
+        return 1;
+    }
 
+    if (dev == NULL) {
+        return 1;
+    }
+
+    ggml_backend_buffer_type_t bufft = dev->iface.get_buffer_type(dev);
     apir_encode_ggml_buffer_type(enc, bufft);
 
     return 0;

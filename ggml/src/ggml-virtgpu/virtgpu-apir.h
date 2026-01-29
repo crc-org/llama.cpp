@@ -12,4 +12,4 @@ struct apir_buffer_context_t {
     apir_buffer_type_host_handle_t buft_host_handle;
 };
 
-#include "virtgpu-forward.gen.h"
+#include "./virtgpu-forward.gen.h"

@@ -1,0 +1,95 @@
+# CMakeLists.txt for Windows API Remoting Integration Tests
+cmake_minimum_required(VERSION 3.16)
+
+project(WindowsAPIRemotingTests
+    VERSION 1.0.0
+    DESCRIPTION "Integration tests for Windows API Remoting"
+    LANGUAGES CXX
+)
+
+# Require C++17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Windows-specific settings
+if(WIN32)
+    # Define Windows version requirements
+    add_definitions(-DWIN32_LEAN_AND_MEAN)
+    add_definitions(-DUNICODE -D_UNICODE)
+    add_definitions(-D_WIN32_WINNT=0x0A00)  # Windows 10
+
+    # Find required packages
+    find_package(PkgConfig QUIET)
+
+    # Try to find jsoncpp using vcpkg first
+    find_path(JSONCPP_INCLUDE_DIR
+        NAMES json/json.h
+        PATHS
+            ${CMAKE_PREFIX_PATH}/include
+            C:/vcpkg/installed/x64-windows/include
+    )
+
+    find_library(JSONCPP_LIBRARY
+        NAMES jsoncpp
+        PATHS
+            ${CMAKE_PREFIX_PATH}/lib
+            C:/vcpkg/installed/x64-windows/lib
+    )
+
+    if(JSONCPP_INCLUDE_DIR AND JSONCPP_LIBRARY)
+        message(STATUS "Found jsoncpp for tests: ${JSONCPP_LIBRARY}")
+        set(JSONCPP_FOUND TRUE)
+    else()
+        message(WARNING "jsoncpp not found - integration tests disabled")
+        message(STATUS "Run: vcpkg install jsoncpp:x64-windows")
+        set(JSONCPP_FOUND FALSE)
+    endif()
+
+    if(JSONCPP_FOUND)
+        # Integration test executable
+        add_executable(test-windows-api-remoting
+            test-windows-api-remoting.cpp
+        )
+
+        # Include directories
+        target_include_directories(test-windows-api-remoting PRIVATE
+            ${JSONCPP_INCLUDE_DIR}
+        )
+
+        # Link libraries
+        target_link_libraries(test-windows-api-remoting
+            ${JSONCPP_LIBRARY}
+            ws2_32      # Winsock2
+        )
+
+        # Enable all warnings
+        if(MSVC)
+            target_compile_options(test-windows-api-remoting PRIVATE /W4)
+            # Disable specific warnings that are common in test code
+            target_compile_options(test-windows-api-remoting PRIVATE /wd4127 /wd4996)
+        endif()
+
+        # Install target
+        install(TARGETS test-windows-api-remoting
+            RUNTIME DESTINATION bin
+        )
+
+        message(STATUS "Windows API Remoting integration tests enabled")
+    else()
+        message(STATUS "Windows API Remoting integration tests disabled (missing jsoncpp)")
+    endif()
+else()
+    message(STATUS "Integration tests are Windows-specific")
+endif()
+
+# Print build information
+message(STATUS "Building Windows API Remoting Integration Tests")
+message(STATUS "  Version: ${PROJECT_VERSION}")
+message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  C++ Standard: ${CMAKE_CXX_STANDARD}")
+
+if(JSONCPP_FOUND)
+    message(STATUS "  jsoncpp: ${JSONCPP_LIBRARY}")
+else()
+    message(STATUS "  jsoncpp: NOT FOUND")
+endif()

@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef GGML_VIRTGPU_USE_WINDOWS
+/* Linux DRM VirtGPU Implementation */
+
 #include "virtgpu-utils.h"
 #include "virtgpu-shm.h"
 #include "virtgpu-apir.h"
@@ -13,7 +16,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <threads.h>
-#include <xf86drm.h>
+//#include <xf86drm.h>
 
 #include <cstring>
 
@@ -73,6 +76,28 @@ struct virtgpu {
     /* APIR communication pages */
     virtgpu_shmem reply_shmem;
     virtgpu_shmem data_shmem;
+    virtgpu_shmem command_shmem;  /* Separate buffer for APIR commands */
+
+    /* Mutex to protect shared data_shmem buffer from concurrent access */
+    mtx_t data_shmem_mutex;
+
+    /* Cached device information to prevent memory leaks and race conditions */
+    struct {
+        char *   description;
+        char *   name;
+        int32_t  device_count;
+        uint32_t type;
+        size_t   memory_free;
+        size_t   memory_total;
+    } cached_device_info;
+
+    /* Cached buffer type information to prevent memory leaks and race conditions */
+    struct {
+        apir_buffer_type_host_handle_t host_handle;
+        char *                         name;
+        size_t                         alignment;
+        size_t                         max_size;
+    } cached_buffer_type;
 };
 
 static inline int virtgpu_ioctl(virtgpu * gpu, unsigned long request, void * args) {
@@ -90,3 +115,8 @@ uint32_t remote_call(virtgpu *       gpu,
                      long long *     call_duration_ns);
 
 void remote_call_finish(virtgpu * gpu, apir_encoder * enc, apir_decoder * dec);
+
+#else
+/* Windows winApiRmt Implementation - No Linux DRM Dependencies */
+/* Windows backend uses winApiRmt.h and virtgpu-interface.h instead */
+#endif /* !GGML_VIRTGPU_USE_WINDOWS */
