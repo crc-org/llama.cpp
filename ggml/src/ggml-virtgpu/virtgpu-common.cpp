@@ -83,22 +83,10 @@ virtgpu* create_virtgpu(void) {
 
 /* Common interface functions that delegate to backend ops */
 struct apir_encoder* remote_call_prepare(virtgpu* gpu, int apir_cmd_type, int32_t cmd_flags) {
-    printf("[COMMON_DEBUG] remote_call_prepare called:\n");
-    printf("[COMMON_DEBUG]   gpu: %p\n", (void*)gpu);
-    printf("[COMMON_DEBUG]   apir_cmd_type: %d\n", apir_cmd_type);
-    printf("[COMMON_DEBUG]   cmd_flags: %d\n", cmd_flags);
-
     if (!gpu || !gpu->ops || !gpu->ops->remote_call_prepare) {
-        printf("[COMMON_DEBUG] ERROR: Invalid virtgpu or missing remote_call_prepare implementation\n");
-        printf("[COMMON_DEBUG]   gpu: %p, gpu->ops: %p\n", (void*)gpu, gpu ? (void*)gpu->ops : (void*)0);
-        if (gpu && gpu->ops) {
-            printf("[COMMON_DEBUG]   gpu->ops->remote_call_prepare: %p\n", (void*)gpu->ops->remote_call_prepare);
-        }
         GGML_LOG_ERROR("Invalid virtgpu or missing remote_call_prepare implementation\n");
         return NULL;
     }
-
-    printf("[COMMON_DEBUG] Calling backend-specific remote_call_prepare: %p\n", (void*)gpu->ops->remote_call_prepare);
     return gpu->ops->remote_call_prepare(gpu, apir_cmd_type, cmd_flags);
 }
 

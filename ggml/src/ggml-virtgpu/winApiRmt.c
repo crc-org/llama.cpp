@@ -153,22 +153,7 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
     }
 
     /* Clear the shared command buffer before use to avoid garbage data */
-    printf("[CLIENT_DEBUG] Clearing shared command buffer before encoding:\n");
-    printf("[CLIENT_DEBUG]   command_buffer_ptr: %p, size: %zu\n", buffer_ptr, buffer_size);
-
-    printf("[CLIENT_DEBUG] Buffer before clearing (first 16 bytes): ");
-    for (size_t i = 0; i < 16; i++) {
-        printf("%02x ", ((uint8_t*)buffer_ptr)[i]);
-    }
-    printf("\n");
-
     memset(buffer_ptr, 0, buffer_size);
-
-    printf("[CLIENT_DEBUG] Buffer after clearing (first 16 bytes): ");
-    for (size_t i = 0; i < 16; i++) {
-        printf("%02x ", ((uint8_t*)buffer_ptr)[i]);
-    }
-    printf("\n");
 
     /* Create APIR encoder using winApiRmt shared buffer */
     struct apir_encoder* encoder = apir_encoder_init(buffer_ptr, buffer_size);
@@ -178,23 +163,8 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
     }
 
     /* Encode the command type and flags - same protocol as Linux version */
-    printf("[CLIENT_DEBUG] Encoding command header:\n");
-    printf("[CLIENT_DEBUG]   apir_cmd_type: %d (0x%x)\n", apir_cmd_type, apir_cmd_type);
-    printf("[CLIENT_DEBUG]   cmd_flags: %d (0x%x)\n", cmd_flags, cmd_flags);
-
     apir_encode_uint32_t(encoder, (uint32_t*)&apir_cmd_type);
-    printf("[CLIENT_DEBUG] After encoding cmd_type, buffer: ");
-    for (size_t i = 0; i < 8; i++) {
-        printf("%02x ", ((uint8_t*)encoder->start)[i]);
-    }
-    printf("\n");
-
     apir_encode_int32_t(encoder, &cmd_flags);
-    printf("[CLIENT_DEBUG] After encoding cmd_flags, buffer: ");
-    for (size_t i = 0; i < 8; i++) {
-        printf("%02x ", ((uint8_t*)encoder->start)[i]);
-    }
-    printf("\n");
 
     return encoder;
 }
@@ -227,7 +197,7 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
         return APIR_FORWARD_INVALID_ARGUMENT;
     }
 
-    /* Send via Windows client using JSON protocol */
+    /* Send via Windows client using JSON protocol - use encoded command data */
     size_t actual_response_size = 0;
     int winapi_ret = ggml_winapi_send_apir_command(win_data->winapi_handle,
                                                   virtgpu_shmem_get_ptr(&gpu->data_shmem),

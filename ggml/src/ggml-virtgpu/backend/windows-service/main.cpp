@@ -1907,17 +1907,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         // APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...]
         // The second field (cmd_flags) contains the actual function ID
         if (apir_data_size >= sizeof(uint32_t) + sizeof(int32_t)) {
-            uint32_t* buffer_as_uint32 = (uint32_t*)mapped_memory;
             function_id = *(int32_t*)((char*)mapped_memory + sizeof(uint32_t));
-            printf("[SERVICE_DEBUG] Extracting function_id from buffer:\n");
-            printf("[SERVICE_DEBUG]   apir_data_size: %I64u bytes\n", apir_data_size);
-            printf("[SERVICE_DEBUG]   Buffer first 16 bytes: ");
-            for (int i = 0; i < 16 && i < (int)apir_data_size; i++) {
-                printf("%02x ", ((uint8_t*)mapped_memory)[i]);
-            }
-            printf("\n");
-            printf("[SERVICE_DEBUG]   Extracted cmd_type: %u (0x%x)\n", buffer_as_uint32[0], buffer_as_uint32[0]);
-            printf("[SERVICE_DEBUG]   Extracted function_id: %d (0x%x)\n", function_id, function_id);
         } else {
             printf("[ERROR] Forward command has insufficient data size: %I64u bytes\n", apir_data_size);
             return ERROR_INVALID_PARAMETER;
@@ -1932,16 +1922,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     }
 
     // Call the APIR backend dispatcher using session ID as virgl_ctx_id
-    printf("[SERVICE_DEBUG] Calling apir_backend_dispatcher:\n");
-    printf("[SERVICE_DEBUG]   session_id: %u\n", session_id);
-    printf("[SERVICE_DEBUG]   function_id (cmd_type param): %d (0x%x)\n", function_id, function_id);
-    printf("[SERVICE_DEBUG]   apir_data_start: %p\n", (void*)apir_data_start);
-    printf("[SERVICE_DEBUG]   buffer after header (first 16 bytes): ");
-    for (int i = 0; i < 16 && apir_data_start + i < (char*)mapped_memory + apir_data_size; i++) {
-        printf("%02x ", ((uint8_t*)apir_data_start)[i]);
-    }
-    printf("\n");
-
     uint32_t dispatch_result = apir_backend_dispatcher(
         session_id,                        // virgl_ctx_id (client session ID)
         &g_windows_callbacks,               // Windows callback interface
@@ -1952,8 +1932,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         response_buffer + MAX_RESPONSE_SIZE, // Output end
         &enc_cur_after                     // Output position after encoding
     );
-
-    printf("[SERVICE_DEBUG] apir_backend_dispatcher returned: %u (0x%x)\n", dispatch_result, dispatch_result);
 
 
     // Avoid Json::Value objects completely - return success code for manual JSON handling
