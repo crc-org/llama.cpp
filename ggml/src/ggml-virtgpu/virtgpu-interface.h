@@ -89,7 +89,8 @@ struct virtgpu {
 
     /* Communication buffers */
     virtgpu_shmem reply_shmem;
-    virtgpu_shmem data_shmem;
+    virtgpu_shmem data_shmem;      /* Kept for Linux compatibility */
+    virtgpu_shmem command_shmem;   /* Separate buffer for APIR commands */
 
     /* Utility arrays */
     util_sparse_array shmem_array;

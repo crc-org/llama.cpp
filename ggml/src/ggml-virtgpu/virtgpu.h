@@ -76,6 +76,7 @@ struct virtgpu {
     /* APIR communication pages */
     virtgpu_shmem reply_shmem;
     virtgpu_shmem data_shmem;
+    virtgpu_shmem command_shmem;  /* Separate buffer for APIR commands */
 
     /* Mutex to protect shared data_shmem buffer from concurrent access */
     mtx_t data_shmem_mutex;

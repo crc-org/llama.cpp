@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <map>
 #include <mutex>
+#include <unordered_map>
 
 #pragma comment(lib, "dbghelp.lib")
 
@@ -303,6 +304,7 @@ DWORD HandleBufferTestAPI(SOCKET client_socket, const Json::Value& request, Json
 DWORD HandlePerformanceAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleSharedBufferAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
+DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response);
 
 /*
  * Windows exception handler for crash detection (replaces Unix signals)
@@ -1033,11 +1035,18 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
                 if (g_ctx.running) {
                     if (error == WSAENOTSOCK || error == WSAEINVAL) {
                         printf("Socket closed during shutdown\n");
+                        break;  // These are fatal errors - service should exit
+                    } else if (error == WSAEWOULDBLOCK || error == WSAEINTR) {
+                        // These are normal - no connection pending, just continue
+                        continue;
                     } else {
                         printf("accept() failed: %d\n", error);
+                        // For other errors, continue trying rather than exiting
+                        continue;
                     }
+                } else {
+                    break;  // Service is shutting down
                 }
-                break;
             }
         }
     }
@@ -1114,14 +1123,13 @@ DWORD HandleClient(SOCKET client_socket)
 
             fflush(stdout);
 
-            // Skip JSON parsing for APIR responses (they don't need buffer operations and parsing causes crashes)
+            // Skip JSON parsing for APIR responses and buffer registration responses (they don't need buffer operations and parsing causes crashes)
             if (strstr(response_buffer, "\"api\":\"apir\"") != NULL ||
-                strstr(response_buffer, "\"cmd_type\"") != NULL) {
+                strstr(response_buffer, "\"cmd_type\"") != NULL ||
+                strstr(response_buffer, "\"buffer_id\"") != NULL) {
                 fflush(stdout);
             } else {
                 // Only do buffer operations for non-APIR APIs (buffer_test, etc.)
-                printf("[INFO] Non-APIR response, checking for buffer operations\n");
-                fflush(stdout);
                 Json::Value parsed_response;
                 Json::Reader response_reader;
 
@@ -1294,10 +1302,7 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
 
     if (api.empty()) {
         printf("[ERROR] Missing API name in request\n");
-        response = CreateErrorResponse(request_id, "Missing API name");
-        std::string response_str = Json::writeString(builder, response);
-        strncpy(response_json, response_str.c_str(), response_size - 1);
-        response_json[response_size - 1] = '\0';
+        snprintf(response_json, response_size, "{\"error\":\"Missing API name\",\"request_id\":%u}", request_id);
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -1325,6 +1330,30 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     }
     else if (api == "shared_buffer") {
         result = HandleSharedBufferAPI(client_socket, request, response);
+    }
+    else if (api == "register_buffer") {
+        printf("Register buffer API called - Buffer ID: %u, Path: %s\n", buffer_id, shared_file_path.c_str());
+
+        result = HandleBufferRegistrationAPI(client_socket, request_id, buffer_id, shared_file_path, response);
+
+        // Special handling for buffer registration to avoid Json::Value crashes
+        if (result == ERROR_SUCCESS) {
+            // Create manual JSON success response instead of using Json::Value
+            snprintf(response_json, response_size,
+                    "{\"status\":\"success\","
+                    "\"request_id\":%u,"
+                    "\"buffer_id\":%u}",
+                    request_id, buffer_id);
+        } else {
+            // Create manual JSON error response instead of using Json::Value
+            snprintf(response_json, response_size,
+                    "{\"status\":\"error\","
+                    "\"request_id\":%u,"
+                    "\"error\":\"Buffer registration failed\"}",
+                    request_id);
+        }
+
+        return ERROR_SUCCESS;  // Return success with response already written to avoid Json::Value serialization
     }
     else if (api == "apir") {
         try {
@@ -1459,10 +1488,22 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         result = ERROR_INVALID_FUNCTION;
     }
 
-    // Convert response to JSON string
-    std::string response_str = Json::writeString(builder, response);
-    strncpy(response_json, response_str.c_str(), response_size - 1);
-    response_json[response_size - 1] = '\0';
+    // Convert response to JSON string with error handling
+    try {
+        std::string response_str = Json::writeString(builder, response);
+        if (response_str.empty() || response_str.c_str() == NULL) {
+            snprintf(response_json, response_size, "{\"error\":\"JSON serialization failed\",\"request_id\":%u}", request_id);
+        } else {
+            strncpy(response_json, response_str.c_str(), response_size - 1);
+            response_json[response_size - 1] = '\0';
+        }
+    } catch (const std::exception& e) {
+        printf("[ERROR] JSON serialization exception: %s\n", e.what());
+        snprintf(response_json, response_size, "{\"error\":\"JSON serialization exception\",\"request_id\":%u}", request_id);
+    } catch (...) {
+        printf("[ERROR] Unknown JSON serialization exception\n");
+        snprintf(response_json, response_size, "{\"error\":\"Unknown JSON error\",\"request_id\":%u}", request_id);
+    }
 
     return result;
 }
@@ -2024,4 +2065,115 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     fflush(stdout);
     // Return special code to indicate success but avoid Json::Value serialization
     return 999;  // Custom success code for manual JSON handling
+}
+
+/*
+ * Buffer Registration API Handler
+ * Registers a shared memory buffer for later lookup by buffer ID
+ */
+DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response) {
+    UNREFERENCED_PARAMETER(client_socket);
+    UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
+
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    // Get session ID from client socket (in real implementation, we'd extract this from connection context)
+    // For now, use a default session ID since we need to associate buffers with sessions
+    uint32_t session_id = 500;  // Hardcode for now - should be extracted from client context
+
+    // Get or create client session
+    auto& session = g_client_sessions[session_id];
+    if (session.session_id == 0) {
+        session.session_id = session_id;
+        printf("Created new session: %u\n", session_id);
+    }
+
+    // Check if buffer ID already exists for this session
+    if (session.buffers.find(buffer_id) != session.buffers.end()) {
+        printf("[WARNING] Buffer ID %u already registered for session %u, overwriting\n", buffer_id, session_id);
+    }
+
+    // Translate WSL2 path to Windows path
+    std::string windows_path = file_path;
+    if (file_path.substr(0, 7) == "/mnt/c/") {
+        // Convert /mnt/c/temp/file.dat -> C:\temp\file.dat
+        windows_path = "C:" + file_path.substr(6);
+        // Convert forward slashes to backslashes
+        for (char& c : windows_path) {
+            if (c == '/') c = '\\';
+        }
+        printf("Translated path: %s -> %s\n", file_path.c_str(), windows_path.c_str());
+    }
+
+    // Open shared memory file
+    HANDLE file_handle = CreateFileA(
+        windows_path.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        printf("[ERROR] Failed to open shared memory file: %s (error: %lu)\n", windows_path.c_str(), error);
+        return ERROR_FILE_NOT_FOUND;
+    }
+
+    // Get file size
+    LARGE_INTEGER file_size;
+    if (!GetFileSizeEx(file_handle, &file_size)) {
+        CloseHandle(file_handle);
+        printf("[ERROR] Failed to get file size for: %s\n", windows_path.c_str());
+        return ERROR_INVALID_DATA;
+    }
+
+    // Create file mapping
+    HANDLE mapping_handle = CreateFileMappingA(
+        file_handle,
+        NULL,
+        PAGE_READWRITE,
+        0,
+        0,
+        NULL
+    );
+
+    if (mapping_handle == NULL) {
+        CloseHandle(file_handle);
+        printf("[ERROR] Failed to create file mapping for: %s\n", windows_path.c_str());
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Map the file into memory
+    void* mapped_memory = MapViewOfFile(
+        mapping_handle,
+        FILE_MAP_ALL_ACCESS,
+        0,
+        0,
+        0
+    );
+
+    if (mapped_memory == NULL) {
+        CloseHandle(mapping_handle);
+        CloseHandle(file_handle);
+        printf("[ERROR] Failed to map view of file: %s\n", windows_path.c_str());
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Store buffer mapping
+    BufferMapping mapping;
+    mapping.file_handle = file_handle;
+    mapping.mapping_handle = mapping_handle;
+    mapping.mapped_memory = mapped_memory;
+    mapping.size = (size_t)file_size.QuadPart;
+    mapping.file_path = file_path;
+
+    session.buffers[buffer_id] = mapping;
+
+    printf("Successfully registered buffer: session=%u, buffer_id=%u, file=%s, size=%zu bytes\n",
+           session_id, buffer_id, file_path.c_str(), mapping.size);
+
+    return ERROR_SUCCESS;
 }

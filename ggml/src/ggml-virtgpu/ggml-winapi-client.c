@@ -295,6 +295,61 @@ void ggml_winapi_free_shared_buffer(ggml_winapi_shared_buffer_t *buffer) {
     buffer->buffer_id = 0;
 }
 
+/* Register buffer with Windows host */
+int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
+                               const ggml_winapi_shared_buffer_t* buffer) {
+    if (!handle || !buffer) {
+        return GGML_WINAPI_ERROR_INVALID_PARAMS;
+    }
+
+    ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
+
+    /* Create buffer registration message */
+    char json_string[1024];
+    snprintf(json_string, sizeof(json_string),
+             "{"
+             "\"api\":\"register_buffer\","
+             "\"buffer_id\":%u,"
+             "\"shared_file_path\":\"%s\","
+             "\"buffer_size\":%zu"
+             "}",
+             buffer->buffer_id, buffer->file_path, buffer->size);
+
+    /* Send registration request */
+    int ret = winapi_send_json_message(ctx->socket_fd, json_string);
+    if (ret != 0) {
+        fprintf(stderr, "ggml-winapi: Failed to send buffer registration for buffer %u\n", buffer->buffer_id);
+        return GGML_WINAPI_ERROR_SEND_FAILED;
+    }
+
+    /* Receive registration response */
+    char response_json[1024];
+    int response_len = winapi_receive_response(ctx->socket_fd, response_json, sizeof(response_json));
+    if (response_len <= 0) {
+        fprintf(stderr, "ggml-winapi: Failed to receive buffer registration response\n");
+        return GGML_WINAPI_ERROR_SEND_FAILED;
+    }
+
+    /* Parse response to check if registration succeeded */
+    char* status_ptr = strstr(response_json, "\"status\":");
+    if (status_ptr) {
+        status_ptr += 9; /* skip "status": */
+        while (*status_ptr == ' ' || *status_ptr == '\t') {
+            status_ptr++; /* skip whitespace */
+        }
+        if (*status_ptr == '"') {
+            status_ptr++;
+            if (strncmp(status_ptr, "success", 7) == 0) {
+                printf("Successfully registered buffer %u with Windows service\n", buffer->buffer_id);
+                return GGML_WINAPI_OK;
+            }
+        }
+    }
+
+    fprintf(stderr, "ggml-winapi: Buffer registration failed for buffer %u\n", buffer->buffer_id);
+    return GGML_WINAPI_ERROR_SEND_FAILED;
+}
+
 /* Send APIR command to Windows host */
 int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                                  const void* apir_data,
@@ -421,6 +476,15 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     /* Handle successful response with binary data */
     if (strcmp(status_str, "success") == 0 && error_code == 0) {
         if (strlen(response_file_path) > 0) {
+            /* Check if response file exists before attempting to open */
+            if (access(response_file_path, F_OK) != 0) {
+                fprintf(stderr, "ggml-winapi: Response file does not exist: %s\n", response_file_path);
+                fprintf(stderr, "ggml-winapi: This likely means the Windows service crashed or failed to process the request\n");
+                *response_size = 0;
+                ret = GGML_WINAPI_ERROR_SEND_FAILED;
+                return ret;
+            }
+
             /* Read binary response data from file */
             int response_fd = open(response_file_path, O_RDONLY);
             if (response_fd >= 0) {

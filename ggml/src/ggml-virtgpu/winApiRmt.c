@@ -77,6 +77,15 @@ static virtgpu* windows_create(void) {
     /* Initialize utility arrays */
     util_sparse_array_init(&gpu->shmem_array, sizeof(virtgpu_shmem));
 
+    /* Initialize mutex for data buffer synchronization */
+    if (mtx_init(&gpu->data_shmem_mutex, mtx_plain) != thrd_success) {
+        printf("Failed to initialize data_shmem mutex\n");
+        ggml_winapi_cleanup(win_data->winapi_handle);
+        free(win_data);
+        free(gpu);
+        return NULL;
+    }
+
     /* Allocate main communication buffers using direct Windows implementation */
     if (windows_shmem_create(gpu, WINAPI_REPLY_BUFFER_SIZE, &gpu->reply_shmem) != 0) {
         GGML_LOG_ERROR("Failed to allocate reply buffer\n");
@@ -86,8 +95,13 @@ static virtgpu* windows_create(void) {
         return NULL;
     }
 
-    if (windows_shmem_create(gpu, WINAPI_DATA_BUFFER_SIZE, &gpu->data_shmem) != 0) {
-        GGML_LOG_ERROR("Failed to allocate data buffer\n");
+    /* Initialize data_shmem for Linux compatibility (Windows uses dynamic buffers) */
+    memset(&gpu->data_shmem, 0, sizeof(gpu->data_shmem));
+    gpu->data_shmem.mmap_size = 0;  // Force Linux code to always use dynamic buffers
+
+    /* Create separate command buffer for APIR commands */
+    if (windows_shmem_create(gpu, 4096, &gpu->command_shmem) != 0) {
+        GGML_LOG_ERROR("Failed to allocate command buffer\n");
         windows_shmem_destroy(gpu, &gpu->reply_shmem);
         ggml_winapi_cleanup(win_data->winapi_handle);
         free(win_data);
@@ -103,8 +117,9 @@ static virtgpu* windows_create(void) {
     gpu->ops = virtgpu_backend_windows_winapi_get_ops();  // Set ops after structure definition
 
     GGML_LOG_INFO("Windows initialization complete\n");
-    GGML_LOG_INFO("  Reply buffer: %zu MB\n", WINAPI_REPLY_BUFFER_SIZE / (1024*1024));
-    GGML_LOG_INFO("  Data buffer:  %zu MB\n", WINAPI_DATA_BUFFER_SIZE / (1024*1024));
+    GGML_LOG_INFO("  Reply buffer:   %zu MB\n", WINAPI_REPLY_BUFFER_SIZE / (1024*1024));
+    GGML_LOG_INFO("  Command buffer: %zu KB\n", gpu->command_shmem.mmap_size / 1024);
+    GGML_LOG_INFO("  Data buffers:   Dynamic allocation\n");
 
     return gpu;
 }
@@ -116,12 +131,15 @@ static void windows_destroy(virtgpu* gpu) {
 
     virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
 
-    /* Clean up communication buffers */
+    /* Clean up persistent communication buffers */
     virtgpu_shmem_destroy(gpu, &gpu->reply_shmem);
-    virtgpu_shmem_destroy(gpu, &gpu->data_shmem);
+    virtgpu_shmem_destroy(gpu, &gpu->command_shmem);
 
     /* Clean up utility arrays */
     util_sparse_array_finish(&gpu->shmem_array);
+
+    /* Clean up mutex */
+    mtx_destroy(&gpu->data_shmem_mutex);
 
     /* Clean up Windows connection */
     if (win_data && win_data->winapi_handle) {
@@ -181,26 +199,16 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
     /* Get encoded data size and validate */
     size_t encoded_size = apir_encoder_get_encoded_size(enc);
 
-    printf("[CLIENT_DEBUG] Client sending command data:\n");
-    printf("[CLIENT_DEBUG]   encoded_size: %zu bytes\n", encoded_size);
-    printf("[CLIENT_DEBUG]   command_buffer_size: %zu bytes\n", gpu->command_shmem.mmap_size);
-    printf("[CLIENT_DEBUG]   encoder state: start=%p, cur=%p, end=%p\n", enc->start, enc->cur, enc->end);
-    printf("[CLIENT_DEBUG]   encoded data (first 16 bytes): ");
-    for (size_t i = 0; i < (encoded_size < 16 ? encoded_size : 16); i++) {
-        printf("%02x ", ((uint8_t*)enc->start)[i]);
-    }
-    printf("\n");
-
-    if (encoded_size > gpu->data_shmem.mmap_size) {
-        GGML_LOG_ERROR("Encoded data size %zu exceeds buffer size %zu\n",
-               encoded_size, gpu->data_shmem.mmap_size);
+    if (encoded_size > gpu->command_shmem.mmap_size) {
+        GGML_LOG_ERROR("Encoded data size %zu exceeds command buffer size %zu\n",
+               encoded_size, gpu->command_shmem.mmap_size);
         return APIR_FORWARD_INVALID_ARGUMENT;
     }
 
     /* Send via Windows client using JSON protocol - use encoded command data */
     size_t actual_response_size = 0;
     int winapi_ret = ggml_winapi_send_apir_command(win_data->winapi_handle,
-                                                  virtgpu_shmem_get_ptr(&gpu->data_shmem),
+                                                  enc->start,
                                                   encoded_size,
                                                   virtgpu_shmem_get_ptr(&gpu->reply_shmem),
                                                   gpu->reply_shmem.mmap_size,
@@ -284,7 +292,18 @@ static int windows_shmem_create(virtgpu* gpu, size_t size, virtgpu_shmem* shmem)
     shmem->mmap_ptr = shmem_data->buffer.data;
     shmem->backend_data = shmem_data;
 
-    GGML_LOG_INFO("Created shared buffer: %zu bytes at %p\n", size, shmem->mmap_ptr);
+    /* Register buffer with Windows service */
+    printf("Attempting to register buffer %u with Windows service...\n", shmem_data->buffer.buffer_id);
+    ret = ggml_winapi_register_buffer(win_data->winapi_handle, &shmem_data->buffer);
+    if (ret != GGML_WINAPI_OK) {
+        printf("Failed to register buffer %u with Windows service (ret=%d)\n", shmem_data->buffer.buffer_id, ret);
+        ggml_winapi_free_shared_buffer(&shmem_data->buffer);
+        free(shmem_data);
+        return ret;
+    }
+    printf("Successfully registered buffer %u with Windows service\n", shmem_data->buffer.buffer_id);
+
+    GGML_LOG_INFO("Created shared buffer: %zu bytes at %p, ID=%u\n", size, shmem->mmap_ptr, shmem->res_id);
     return 0;
 }
 

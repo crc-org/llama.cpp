@@ -63,6 +63,10 @@ int ggml_winapi_alloc_shared_buffer(ggml_winapi_handle_t handle,
 /* Free shared memory buffer */
 void ggml_winapi_free_shared_buffer(ggml_winapi_shared_buffer_t *buffer);
 
+/* Register buffer with Windows host */
+int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
+                               const ggml_winapi_shared_buffer_t* buffer);
+
 /* Send APIR command to Windows host */
 int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                                  const void* apir_data,
