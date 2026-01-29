@@ -65,13 +65,18 @@ static size_t ggml_backend_remoting_buffer_type_get_alloc_size(ggml_backend_buff
     return apir_buffer_type_get_alloc_size(gpu, gpu->cached_buffer_type.host_handle, tensor);
 }
 
+static bool ggml_backend_remoting_buffer_type_is_host(ggml_backend_buffer_type_t buft) {
+    GGML_UNUSED(buft);
+    return true;
+}
+
 const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_type_interface = {
     /* .get_name         = */ ggml_backend_remoting_buffer_type_get_name,
     /* .alloc_buffer     = */ ggml_backend_remoting_buffer_type_alloc_buffer,
     /* .get_alignment    = */ ggml_backend_remoting_buffer_type_get_alignment,
     /* .get_max_size     = */ ggml_backend_remoting_buffer_type_get_max_size,
     /* .get_alloc_size   = */ ggml_backend_remoting_buffer_type_get_alloc_size,
-    /* .is_host          = */ NULL,
+    /* .is_host          = */ ggml_backend_remoting_buffer_type_is_host,
 };
 
 const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_from_ptr_type_interface = {
@@ -80,5 +85,5 @@ const ggml_backend_buffer_type_i ggml_backend_remoting_buffer_from_ptr_type_inte
     /* .get_alignment    = */ ggml_backend_remoting_buffer_type_get_alignment,
     /* .get_max_size     = */ ggml_backend_remoting_buffer_type_get_max_size,
     /* .get_alloc_size   = */ ggml_backend_remoting_buffer_type_get_alloc_size,
-    /* .is_host          = */ NULL,
+    /* .is_host          = */ ggml_backend_remoting_buffer_type_is_host,
 };
