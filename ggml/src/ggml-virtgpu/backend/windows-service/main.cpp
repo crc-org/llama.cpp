@@ -1958,61 +1958,108 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
                 strcat(response_file_path, "_response");
             }
 
-            // Write response data to file
-            HANDLE response_file = CreateFileA(response_file_path,
-                                             GENERIC_WRITE,
-                                             0,
-                                             NULL,
-                                             CREATE_ALWAYS,
-                                             FILE_ATTRIBUTE_NORMAL,
-                                             NULL);
+                // Write response data to file
+                HANDLE response_file = CreateFileA(response_file_path,
+                                                 GENERIC_WRITE,
+                                                 0,
+                                                 NULL,
+                                                 CREATE_ALWAYS,
+                                                 FILE_ATTRIBUTE_NORMAL,
+                                                 NULL);
 
-            if (response_file != INVALID_HANDLE_VALUE) {
-                DWORD bytes_written;
-                BOOL write_success = WriteFile(response_file,
-                                              response_buffer,
-                                              (DWORD)response_data_size,
-                                              &bytes_written,
-                                              NULL);
+                if (response_file != INVALID_HANDLE_VALUE) {
+                    DWORD bytes_written;
+                    BOOL write_success = WriteFile(response_file,
+                                                  response_buffer,
+                                                  (DWORD)response_data_size,
+                                                  &bytes_written,
+                                                  NULL);
 
-                // Force sync response data to disk before WSL2 client reads it
-                if (write_success) {
-                    BOOL flush_success = FlushFileBuffers(response_file);
-                    if (!flush_success) {
-                        printf("[SERVER] Warning: FlushFileBuffers failed (error: %lu)\n", GetLastError());
-                    }
-                }
-
-                CloseHandle(response_file);
-
-                if (write_success && bytes_written == response_data_size) {
-                    // Convert back to Linux path for client using C strings
-                    char linux_response_path[512];
-                    if (strncmp(response_file_path, "C:", 2) == 0) {
-                        snprintf(linux_response_path, sizeof(linux_response_path), "/mnt/c%s", response_file_path + 2);
-                        // Replace \ with /
-                        for (char* p = linux_response_path; *p; p++) {
-                            if (*p == '\\') *p = '/';
+                    // Force sync response data to disk before WSL2 client reads it
+                    if (write_success) {
+                        BOOL flush_success = FlushFileBuffers(response_file);
+                        if (!flush_success) {
+                            printf("[ERROR] FlushFileBuffers failed for response (error: %lu)\n", GetLastError());
                         }
                     } else {
-                        strncpy(linux_response_path, response_file_path, sizeof(linux_response_path) - 1);
-                        linux_response_path[sizeof(linux_response_path) - 1] = '\0';
+                        printf("[ERROR] WriteFile failed for response (error: %lu)\n", GetLastError());
                     }
-                    // Store the response file path for JSON response
-                    strncpy(g_response_file_path, linux_response_path, sizeof(g_response_file_path) - 1);
-                    g_response_file_path[sizeof(g_response_file_path) - 1] = '\0';
+
+                    CloseHandle(response_file);
+
+                    if (write_success && bytes_written == response_data_size) {
+                        // Convert back to Linux path for client using C strings
+                        char linux_response_path[512];
+                        if (strncmp(response_file_path, "C:", 2) == 0) {
+                            snprintf(linux_response_path, sizeof(linux_response_path), "/mnt/c%s", response_file_path + 2);
+                            // Replace \ with /
+                            for (char* p = linux_response_path; *p; p++) {
+                                if (*p == '\\') *p = '/';
+                            }
+                        } else {
+                            strncpy(linux_response_path, response_file_path, sizeof(linux_response_path) - 1);
+                            linux_response_path[sizeof(linux_response_path) - 1] = '\0';
+                        }
+                        // Store the response file path for JSON response
+                        strncpy(g_response_file_path, linux_response_path, sizeof(g_response_file_path) - 1);
+                        g_response_file_path[sizeof(g_response_file_path) - 1] = '\0';
+                    } else {
+                        printf("[ERROR] Failed to write response data (wrote %lu of %zu bytes)\n",
+                               bytes_written, response_data_size);
+                    }
                 } else {
-                    printf("[ERROR] Failed to write response data (wrote %lu of %zu bytes)\n",
-                           bytes_written, response_data_size);
+                    printf("[ERROR] Failed to create response file: %s (error: %lu)\n",
+                           response_file_path, GetLastError());
                 }
-            } else {
-                printf("[ERROR] Failed to create response file: %s (error: %lu)\n",
-                       response_file_path, GetLastError());
-            }
+        } else {
+            printf("[WINDOWS_SERVICE] No response data to write (response_data_size=0)\n");
         }
     } else {
-        // Error
+        // Error - still need to create response file with error information
         printf("[ERROR] APIR command failed with code: %u\n", dispatch_result);
+
+        // Create response file with error code
+        char response_file_path[512];
+        strncpy(response_file_path, windows_path, sizeof(response_file_path) - 20);
+        response_file_path[sizeof(response_file_path) - 20] = '\0';
+
+        // Add _response suffix
+        char* dot = strrchr(response_file_path, '.');
+        if (dot) {
+            strcpy(dot, "_response.dat");
+        } else {
+            strcat(response_file_path, "_response");
+        }
+
+        // Write error response (empty file or error code)
+        HANDLE response_file = CreateFileA(response_file_path,
+                                         GENERIC_WRITE,
+                                         0,
+                                         NULL,
+                                         CREATE_ALWAYS,
+                                         FILE_ATTRIBUTE_NORMAL,
+                                         NULL);
+
+        if (response_file != INVALID_HANDLE_VALUE) {
+            // Write error code as response
+            DWORD bytes_written;
+            BOOL write_success = WriteFile(response_file, &dispatch_result, sizeof(dispatch_result), &bytes_written, NULL);
+
+            if (write_success) {
+                BOOL flush_success = FlushFileBuffers(response_file);
+                if (!flush_success) {
+                    printf("[ERROR] FlushFileBuffers failed for error response (error: %lu)\n", GetLastError());
+                }
+            } else {
+                printf("[ERROR] WriteFile failed for error response (error: %lu)\n", GetLastError());
+            }
+
+            CloseHandle(response_file);
+
+            printf("[WINDOWS_SERVICE] Created error response file: %s\n", response_file_path);
+        } else {
+            printf("[ERROR] Failed to create error response file: %s\n", response_file_path);
+        }
     }
 
     // Don't touch Json::Value objects at all - return special success code for manual JSON handling
