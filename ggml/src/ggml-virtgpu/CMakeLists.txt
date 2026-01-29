@@ -67,6 +67,7 @@ if (NOT GGML_VIRTGPU_BACKEND STREQUAL "ONLY")
             winApiRmt.h
             ggml-winapi-client.c
             apir-minimal.h
+            apir_cs_ggml-rpc-front.cpp
             ../../include/ggml-virtgpu.h
         )
     else()
