@@ -293,7 +293,6 @@ static int windows_shmem_create(virtgpu* gpu, size_t size, virtgpu_shmem* shmem)
     shmem->backend_data = shmem_data;
 
     /* Register buffer with Windows service */
-    printf("Attempting to register buffer %u with Windows service...\n", shmem_data->buffer.buffer_id);
     ret = ggml_winapi_register_buffer(win_data->winapi_handle, &shmem_data->buffer);
     if (ret != GGML_WINAPI_OK) {
         printf("Failed to register buffer %u with Windows service (ret=%d)\n", shmem_data->buffer.buffer_id, ret);
@@ -301,17 +300,13 @@ static int windows_shmem_create(virtgpu* gpu, size_t size, virtgpu_shmem* shmem)
         free(shmem_data);
         return ret;
     }
-    printf("Successfully registered buffer %u with Windows service\n", shmem_data->buffer.buffer_id);
 
-    GGML_LOG_INFO("Created shared buffer: %zu bytes at %p, ID=%u\n", size, shmem->mmap_ptr, shmem->res_id);
     return 0;
 }
 
 static void windows_shmem_destroy(virtgpu* gpu, virtgpu_shmem* shmem) {
     (void)gpu; // unused in Windows implementation
     if (shmem && shmem->backend_data) {
-        GGML_LOG_INFO("Destroying shared buffer: %zu bytes\n", shmem->mmap_size);
-
         virtgpu_windows_shmem_data* shmem_data = (virtgpu_windows_shmem_data*)shmem->backend_data;
         ggml_winapi_free_shared_buffer(&shmem_data->buffer);
         free(shmem_data);

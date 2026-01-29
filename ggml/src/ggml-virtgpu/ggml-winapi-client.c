@@ -340,7 +340,6 @@ int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
         if (*status_ptr == '"') {
             status_ptr++;
             if (strncmp(status_ptr, "success", 7) == 0) {
-                printf("Successfully registered buffer %u with Windows service\n", buffer->buffer_id);
                 return GGML_WINAPI_OK;
             }
         }

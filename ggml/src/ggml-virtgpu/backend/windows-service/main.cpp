@@ -1297,8 +1297,6 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         result = HandleSharedBufferAPI(client_socket, request, response);
     }
     else if (api == "register_buffer") {
-        printf("Register buffer API called - Buffer ID: %u, Path: %s\n", buffer_id, shared_file_path.c_str());
-
         result = HandleBufferRegistrationAPI(client_socket, request_id, buffer_id, shared_file_path, response);
 
         // Special handling for buffer registration to avoid Json::Value crashes
@@ -2037,20 +2035,17 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
  * Registers a shared memory buffer for later lookup by buffer ID
  */
 DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response) {
-    UNREFERENCED_PARAMETER(client_socket);
     UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
 
     std::lock_guard<std::mutex> lock(g_buffer_mutex);
 
-    // Get session ID from client socket (in real implementation, we'd extract this from connection context)
-    // For now, use a default session ID since we need to associate buffers with sessions
-    uint32_t session_id = 500;  // Hardcode for now - should be extracted from client context
+    // Get session ID from client socket - same logic as APIR commands
+    uint32_t session_id = get_client_session_id(client_socket);
 
     // Get or create client session
     auto& session = g_client_sessions[session_id];
     if (session.session_id == 0) {
         session.session_id = session_id;
-        printf("Created new session: %u\n", session_id);
     }
 
     // Check if buffer ID already exists for this session
@@ -2067,7 +2062,6 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
         for (char& c : windows_path) {
             if (c == '/') c = '\\';
         }
-        printf("Translated path: %s -> %s\n", file_path.c_str(), windows_path.c_str());
     }
 
     // Open shared memory file
@@ -2136,9 +2130,6 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
     mapping.file_path = file_path;
 
     session.buffers[buffer_id] = mapping;
-
-    printf("Successfully registered buffer: session=%u, buffer_id=%u, file=%s, size=%zu bytes\n",
-           session_id, buffer_id, file_path.c_str(), mapping.size);
 
     return ERROR_SUCCESS;
 }
