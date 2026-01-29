@@ -1926,12 +1926,19 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         }
     }
 
+    // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
+    char* apir_data_start = (char*)mapped_memory;
+    if (cmd_type == APIR_COMMAND_TYPE_FORWARD) {
+        // Skip header: uint32_t cmd_type + int32_t cmd_flags = 8 bytes
+        apir_data_start += sizeof(uint32_t) + sizeof(int32_t);
+    }
+
     // Call the APIR backend dispatcher using session ID as virgl_ctx_id
     uint32_t dispatch_result = apir_backend_dispatcher(
         session_id,                        // virgl_ctx_id (client session ID)
         &g_windows_callbacks,               // Windows callback interface
         function_id,                       // Specific APIR function ID (not the general Forward type)
-        (char*)mapped_memory,              // Input buffer (APIR binary data)
+        apir_data_start,                   // Input buffer after header
         (char*)mapped_memory + apir_data_size, // Input end
         response_buffer,                   // Output buffer
         response_buffer + MAX_RESPONSE_SIZE, // Output end
