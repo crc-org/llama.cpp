@@ -978,7 +978,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
             if (client_socket != INVALID_SOCKET) {
                 if (g_ctx.using_tcp) {
                     char* client_ip = inet_ntoa(client_addr.tcp_addr.sin_addr);
-                    printf("[OK] TCP connection accepted from %s:%d\n",
+                    printf("[OK] TCP connection accepted from %s:%d\n\n",
                            client_ip, ntohs(client_addr.tcp_addr.sin_port));
                 } else {
                     printf("[OK] VSOCK connection accepted successfully\n");
@@ -992,7 +992,7 @@ DWORD WINAPI ServiceWorkerThread(LPVOID lpParam)
                 cleanup_client_session(session_id);
 
                 closesocket(client_socket);
-                printf("Client disconnected (session %u cleaned up)\n", session_id);
+                printf("\nClient disconnected (session %u cleaned up)\n", session_id);
                 printf("[INFO] Continuing to wait for next connection...\n");
                 fflush(stdout);
             } else {
@@ -1038,7 +1038,7 @@ DWORD HandleClient(SOCKET client_socket)
         bytes_received = recv(client_socket, (char*)&msg_len, sizeof(msg_len), MSG_WAITALL);
         if (bytes_received != sizeof(msg_len)) {
             if (bytes_received == 0) {
-                printf("[INFO] Client disconnected gracefully\n");
+                printf("\n[INFO] Client disconnected gracefully\n");
             } else {
                 printf("[ERROR] Failed to receive message length: %d\n", WSAGetLastError());
             }
@@ -1862,7 +1862,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
             return ERROR_INVALID_FUNCTION;
         }
         g_ctx.apir_backend_initialized = TRUE;
-        printf("[OK] APIR backend initialized successfully\n");
+        printf("[OK] APIR backend initialized successfully\n\n");
     }
 
     // Check if shared_file_path exists in JSON before attempting string conversion
@@ -2094,6 +2094,7 @@ DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request
     UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
 
     UINT32 request_id = request.get("request_id", 0).asUInt();
+    UNREFERENCED_PARAMETER(request_id);  // Not used since we bypass JSON response
     UINT64 buffer_size = request.get("buffer_size", 0).asUInt64();
 
     std::lock_guard<std::mutex> lock(g_buffer_mutex);

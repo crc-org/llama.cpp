@@ -417,7 +417,7 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
    ==> this means that the guest sees an outdated response buffer
 */
 
-#define FORCE_FLUSH_COMMAND_BUFFER 0
+#define FORCE_FLUSH_COMMAND_BUFFER 1
 
 #if FORCE_FLUSH_COMMAND_BUFFER == 1
     /*

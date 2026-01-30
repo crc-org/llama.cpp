@@ -27,13 +27,7 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     }
 
     int32_t dev_count = reg->iface.get_device_count(reg);
-
-    // INSTRUMENTATION: Exit if more than 2 devices found
-    if (dev_count > 2) {
-        printf("[BACKEND] FATAL: Found %d devices - abnormal! Expected 1-2 maximum. Terminating.\n", dev_count);
-        exit(1);
-    }
-
+    printf("==> %d <==\n", dev_count);
     apir_encode_int32_t(enc, &dev_count);
 
     return 0;
@@ -44,7 +38,7 @@ uint32_t backend_device_get_name(apir_encoder * enc, apir_decoder * dec, virgl_a
     GGML_UNUSED(dec);
 
     const char * string = dev->iface.get_name(dev);
-
+    printf("==> %s <==\n", string);
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);
     apir_encode_char_array(enc, string, string_size);

@@ -33,23 +33,27 @@ static virtgpu * apir_initialize() {
             GGML_ABORT("failed to initialize the virtgpu");
         }
 
+        printf("\n[VIRTGPU] Populating the cache values\n");
         // Pre-fetch and cache all device information, it will not change
         gpu->cached_device_info.description  = apir_device_get_description(gpu);
         if (!gpu->cached_device_info.description) {
             GGML_ABORT("failed to initialize the virtgpu device description");
         }
+        printf("==> %s\n", gpu->cached_device_info.description);
+
         gpu->cached_device_info.name         = apir_device_get_name(gpu);
         if (!gpu->cached_device_info.name) {
             GGML_ABORT("failed to initialize the virtgpu device name");
         }
+        printf("==> %s\n", gpu->cached_device_info.name);
         gpu->cached_device_info.device_count = apir_device_get_count(gpu);
+        printf("==> %d\n", gpu->cached_device_info.device_count);
         gpu->cached_device_info.type         = apir_device_get_type(gpu);
 
         apir_device_get_memory(gpu,
                               &gpu->cached_device_info.memory_free,
                               &gpu->cached_device_info.memory_total);
 
-        printf("[VIRTGPU] Populating the cache values\n");
         apir_buffer_type_host_handle_t buft_host_handle = apir_device_get_buffer_type(gpu);
         if (buft_host_handle == 0) {
             GGML_ABORT("failed to get valid buffer type from device - Windows service returned garbage data");
