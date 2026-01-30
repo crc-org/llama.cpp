@@ -46,6 +46,9 @@ static virtgpu * apir_initialize() {
                               &gpu->cached_device_info.memory_total);
 
         apir_buffer_type_host_handle_t buft_host_handle = apir_device_get_buffer_type(gpu);
+        if (buft_host_handle == 0) {
+            GGML_ABORT("failed to get valid buffer type from device - Windows service returned garbage data");
+        }
         gpu->cached_buffer_type.host_handle             = buft_host_handle;
         gpu->cached_buffer_type.name                    = apir_buffer_type_get_name(gpu, buft_host_handle);
         if (!gpu->cached_buffer_type.name) {

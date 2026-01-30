@@ -148,6 +148,15 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
 
     apir_buffer_type_host_handle_t buft_handle = (apir_buffer_type_host_handle_t)buft;
 
+    // Validate the decoded buffer type handle
+    if (buft_handle == 0 || buft_handle < 0x10000) {
+        printf("[GUEST] ERROR: apir_device_get_buffer_type received invalid buffer type handle: %lu (0x%lx)\n",
+               (unsigned long)buft_handle, (unsigned long)buft_handle);
+        printf("[GUEST] ERROR: This indicates the Windows service returned garbage data\n");
+        remote_call_finish(gpu, encoder, decoder);
+        return 0; // Return 0 to indicate failure
+    }
+
     remote_call_finish(gpu, encoder, decoder);
 
     return buft_handle;

@@ -223,9 +223,9 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
     size_t reply_size = gpu->reply_shmem.mmap_size;
 
     if (!reply_ptr) {
-        GGML_LOG_ERROR("Reply buffer is not mapped\n");
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
+
 
     /* Initialize decoder with reply buffer */
     *dec = apir_decoder_init(reply_ptr, reply_size);

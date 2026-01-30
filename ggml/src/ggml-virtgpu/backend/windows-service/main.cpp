@@ -304,6 +304,7 @@ DWORD HandleBufferTestAPI(SOCKET client_socket, const Json::Value& request, Json
 DWORD HandlePerformanceAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleSharedBufferAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
+DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response);
 
 /*
@@ -1188,13 +1189,14 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     }
 
     // Manual JSON parsing since jsoncpp is crashing on field access
-    // JSON format: {"api":"apir","request_id":1,"apir_cmd_type":2,"apir_data_size":8,"shared_file_path":"/path","buffer_id":3}
+    // JSON format: {"api":"apir","request_id":1,"apir_cmd_type":2,"apir_data_size":8,"shared_file_path":"/path","buffer_id":3,"response_buffer_id":1}
     std::string api;
     UINT32 request_id;
     UINT32 apir_cmd_type;
     UINT32 apir_data_size;
     std::string shared_file_path;
     UINT32 buffer_id;
+    UINT32 response_buffer_id;
 
     // Simple manual parsing - more reliable than buggy jsoncpp
     const char* json_str = json_copy.c_str();
@@ -1263,6 +1265,15 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         buffer_id = 0;
     }
 
+    // Extract response_buffer_id field
+    const char* resp_buf_id_start = strstr(json_str, "\"response_buffer_id\":");
+    if (resp_buf_id_start) {
+        resp_buf_id_start += 21; // Skip "response_buffer_id":
+        response_buffer_id = (UINT32)strtoul(resp_buf_id_start, NULL, 10);
+    } else {
+        response_buffer_id = buffer_id; // Default to input buffer if not specified
+    }
+
 
 
     if (api.empty()) {
@@ -1295,6 +1306,62 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     }
     else if (api == "shared_buffer") {
         result = HandleSharedBufferAPI(client_socket, request, response);
+    }
+    else if (api == "allocate_buffer") {
+        result = HandleBufferAllocationAPI(client_socket, request, response);
+
+        // Special handling for buffer allocation to avoid Json::Value crashes
+        if (result == ERROR_SUCCESS) {
+            // Need to get the allocated buffer info to include in response
+            uint32_t session_id = get_client_session_id(client_socket);
+
+            std::lock_guard<std::mutex> lock(g_buffer_mutex);
+            auto& session = g_client_sessions[session_id];
+
+            // Find the most recently allocated buffer (highest ID)
+            uint32_t latest_buffer_id = 0;
+            std::string latest_file_path;
+            UINT64 latest_buffer_size = request.get("buffer_size", 0).asUInt64();
+
+            for (const auto& [buf_id, buf_mapping] : session.buffers) {
+                if (buf_id > latest_buffer_id) {
+                    latest_buffer_id = buf_id;
+                    latest_file_path = buf_mapping.file_path;
+                }
+            }
+
+            // Convert Windows path to WSL2 path for the response
+            std::string wsl_file_path = latest_file_path;
+            if (wsl_file_path.find("C:\\temp\\") == 0) {
+                wsl_file_path = "/mnt/c/temp/" + wsl_file_path.substr(8); // Replace "C:\temp\" with "/mnt/c/temp/"
+                // Replace backslashes with forward slashes
+                for (auto& c : wsl_file_path) {
+                    if (c == '\\') c = '/';
+                }
+            }
+
+            printf("[DEBUG] Path conversion: Windows='%s' -> WSL2='%s'\n",
+                   latest_file_path.c_str(), wsl_file_path.c_str());
+
+            // Create manual JSON success response
+            snprintf(response_json, response_size,
+                    "{\"status\":\"success\","
+                    "\"request_id\":%u,"
+                    "\"buffer_id\":%u,"
+                    "\"file_path\":\"%s\","
+                    "\"buffer_size\":%I64u}",
+                    request_id, latest_buffer_id, wsl_file_path.c_str(), latest_buffer_size);
+        } else {
+            // Create manual JSON error response
+            snprintf(response_json, response_size,
+                    "{\"status\":\"error\","
+                    "\"request_id\":%u,"
+                    "\"error\":\"Buffer allocation failed\"}",
+                    request_id);
+        }
+
+        printf("[RESPONSE_JSON] %s\n", response_json);
+        return result;
     }
     else if (api == "register_buffer") {
         result = HandleBufferRegistrationAPI(client_socket, request_id, buffer_id, shared_file_path, response);
@@ -1778,12 +1845,19 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
  */
 DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response)
 {
+    printf("[DEBUG] HandleAPIRAPI: Function entry\n");
+
     UINT32 cmd_type = request.get("apir_cmd_type", 0).asUInt();
     UINT64 apir_data_size = request.get("apir_data_size", 0).asUInt64();
     UINT32 buffer_id = request.get("buffer_id", 0).asUInt();
+    UINT32 response_buffer_id = request.get("response_buffer_id", buffer_id).asUInt(); // Default to input buffer if not specified
+
+    printf("[DEBUG] HandleAPIRAPI: cmd_type=%u, apir_data_size=%I64u, buffer_id=%u, response_buffer_id=%u\n",
+           cmd_type, apir_data_size, buffer_id, response_buffer_id);
 
     // Get session ID from client socket
     uint32_t session_id = get_client_session_id(client_socket);
+    printf("[DEBUG] HandleAPIRAPI: session_id=%u\n", session_id);
 
     // Initialize APIR backend if not already done
     if (!g_ctx.apir_backend_initialized) {
@@ -1793,16 +1867,8 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         ApirLoadLibraryReturnCode init_result = SafeAPIRBackendInit(&init_crashed);
 
         if (init_result != APIR_LOAD_LIBRARY_INIT_BASE_INDEX || init_crashed) {
-            printf("[ERROR] Failed to initialize APIR backend: %s (code: %d)\n",
-                   init_crashed ? "CRASHED" : "ERROR", init_result);
-            printf("[ERROR] Check APIR_LLAMA_CPP_GGML_LIBRARY_PATH environment variable\n");
-
-            // Completely avoid Json::Value for error responses - it's causing crashes
-
-            // Don't touch the response object at all - let the calling code handle it
-            // The calling code will catch ERROR_INVALID_FUNCTION and create its own error response
-
-            return ERROR_INVALID_FUNCTION;  // Return error code to indicate failure
+            printf("[DEBUG] HandleAPIRAPI: APIR backend init failed - returning ERROR_INVALID_FUNCTION\n");
+            return ERROR_INVALID_FUNCTION;
         }
         g_ctx.apir_backend_initialized = TRUE;
         printf("[OK] APIR backend initialized successfully\n");
@@ -1810,7 +1876,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     // Check if shared_file_path exists in JSON before attempting string conversion
     if (!request.isMember("shared_file_path") || request["shared_file_path"].isNull()) {
-        printf("[ERROR] Missing or null shared_file_path in APIR request\n");
+        printf("[DEBUG] HandleAPIRAPI: Missing shared_file_path - returning ERROR_INVALID_PARAMETER\n");
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -1832,31 +1898,53 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
 
     // Get the already-mapped buffer from registration (no need to re-map!)
+    printf("[DEBUG] HandleAPIRAPI: Looking up buffer mapping for session %u, buffer %u\n", session_id, buffer_id);
+
     auto session_it = g_client_sessions.find(session_id);
     if (session_it == g_client_sessions.end()) {
-        printf("[ERROR] No session found for session ID: %u\n", session_id);
+        printf("[DEBUG] HandleAPIRAPI: Session %u not found - returning ERROR_INVALID_PARAMETER\n", session_id);
         return ERROR_INVALID_PARAMETER;
     }
 
     auto& session = session_it->second;
-    auto buffer_it = session.buffers.find(buffer_id);
-    if (buffer_it == session.buffers.end()) {
-        printf("[ERROR] No buffer mapping found for session %u, buffer ID: %u\n", session_id, buffer_id);
+
+    // Show what buffer IDs actually exist
+    printf("[DEBUG] HandleAPIRAPI: Session %u has %zu buffers: ", session_id, session.buffers.size());
+    for (const auto& pair : session.buffers) {
+        printf("%u ", pair.first);
+    }
+    printf("\n");
+
+    // Find input buffer (for APIR command data)
+    auto input_buffer_it = session.buffers.find(buffer_id);
+    if (input_buffer_it == session.buffers.end()) {
+        printf("[DEBUG] HandleAPIRAPI: Input buffer %u not found in session %u\n", buffer_id, session_id);
         return ERROR_INVALID_PARAMETER;
     }
 
-    BufferMapping& buffer_mapping = buffer_it->second;
-    void* mapped_memory = buffer_mapping.mapped_memory;
-    size_t actual_buffer_size = buffer_mapping.size;
+    BufferMapping& input_buffer_mapping = input_buffer_it->second;
+    void* input_mapped_memory = input_buffer_mapping.mapped_memory;
+    size_t input_buffer_size = input_buffer_mapping.size;
 
-    printf("[WINDOWS_SERVICE] Using already-mapped buffer: %p (size=%zu)\n", mapped_memory, actual_buffer_size);
+    printf("[DEBUG] HandleAPIRAPI: Found input buffer mapping: %p (size=%zu)\n", input_mapped_memory, input_buffer_size);
 
-    if (apir_data_size > actual_buffer_size) {
-        printf("[ERROR] Requested size (%I64u) exceeds buffer size (%zu)\n", apir_data_size, actual_buffer_size);
+    if (apir_data_size > input_buffer_size) {
+        printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
         return ERROR_INVALID_PARAMETER;
     }
 
-    // No separate response buffer needed - writing directly to shared memory
+    // Find response buffer (for encoder output)
+    auto response_buffer_it = session.buffers.find(response_buffer_id);
+    if (response_buffer_it == session.buffers.end()) {
+        printf("[DEBUG] HandleAPIRAPI: Response buffer %u not found in session %u\n", response_buffer_id, session_id);
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    BufferMapping& response_buffer_mapping = response_buffer_it->second;
+    void* response_mapped_memory = response_buffer_mapping.mapped_memory;
+    size_t response_buffer_size = response_buffer_mapping.size;
+
+    printf("[DEBUG] HandleAPIRAPI: Found response buffer mapping: %p (size=%zu)\n", response_mapped_memory, response_buffer_size);
 
     char* enc_cur_after = NULL;
 
@@ -1867,7 +1955,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         // APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...]
         // The second field (cmd_flags) contains the actual function ID
         if (apir_data_size >= sizeof(uint32_t) + sizeof(int32_t)) {
-            function_id = *(int32_t*)((char*)mapped_memory + sizeof(uint32_t));
+            function_id = *(int32_t*)((char*)input_mapped_memory + sizeof(uint32_t));
         } else {
             printf("[ERROR] Forward command has insufficient data size: %I64u bytes\n", apir_data_size);
             return ERROR_INVALID_PARAMETER;
@@ -1875,48 +1963,49 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     }
 
     // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
-    char* apir_data_start = (char*)mapped_memory;
+    char* apir_data_start = (char*)input_mapped_memory;
     if (cmd_type == APIR_COMMAND_TYPE_FORWARD) {
         // Skip header: uint32_t cmd_type + int32_t cmd_flags = 8 bytes
         apir_data_start += sizeof(uint32_t) + sizeof(int32_t);
     }
 
     // Call the APIR backend dispatcher using session ID as virgl_ctx_id
-    printf("[WINDOWS_SERVICE] Writing directly to mapped memory at %p (size=%I64u)\n", mapped_memory, apir_data_size);
 
     uint32_t dispatch_result = apir_backend_dispatcher(
         session_id,                        // virgl_ctx_id (client session ID)
         &g_windows_callbacks,               // Windows callback interface
         function_id,                       // Specific APIR function ID (not the general Forward type)
-        apir_data_start,                   // Input buffer after header
-        (char*)mapped_memory + apir_data_size, // Input end
-        (char*)mapped_memory,              // Output buffer - write directly to shared memory!
-        (char*)mapped_memory + apir_data_size, // Output end
+        apir_data_start,                   // Input buffer after header (from input buffer)
+        (char*)input_mapped_memory + apir_data_size, // Input end (from input buffer)
+        (char*)response_mapped_memory,     // Output buffer - write to response buffer!
+        (char*)response_mapped_memory + response_buffer_size, // Output end (response buffer)
         &enc_cur_after                     // Output position after encoding
     );
 
+    printf("[DEBUG] HandleAPIRAPI: Dispatcher returned %u\n", dispatch_result);
+
     // Prepend APIR return code to response (Windows-specific APIR protocol layer)
-    size_t backend_data_size = enc_cur_after - (char*)mapped_memory;
-    memmove((char*)mapped_memory + sizeof(uint32_t), mapped_memory, backend_data_size);
-    *(uint32_t*)mapped_memory = dispatch_result;
+    size_t backend_data_size = enc_cur_after - (char*)response_mapped_memory;
+    memmove((char*)response_mapped_memory + sizeof(uint32_t), response_mapped_memory, backend_data_size);
+    *(uint32_t*)response_mapped_memory = dispatch_result;
     enc_cur_after += sizeof(uint32_t);
 
     printf("[WINDOWS_SERVICE] Added APIR return code ({%d}) to response, total size: %zu\n",
            dispatch_result,
-           enc_cur_after - (char*)mapped_memory);
+           enc_cur_after - (char*)response_mapped_memory);
 
     // Avoid Json::Value objects completely - return success code for manual JSON handling
 
     if (dispatch_result == 0) {
         // Success (APIR_FORWARD_SUCCESS = 0) - data already written directly to shared memory
-        size_t response_data_size = enc_cur_after - (char*)mapped_memory;
+        size_t response_data_size = enc_cur_after - (char*)response_mapped_memory;
 
         // Log shared memory contents
         printf("[WINDOWS_SERVICE] Shared memory content (size=%zu):\n", response_data_size);
         if (response_data_size > 0) {
             printf("[WINDOWS_SERVICE] Hex dump: ");
             for (size_t i = 0; i < response_data_size && i < 64; i++) {
-                printf("%02x ", (unsigned char)((char*)mapped_memory)[i]);
+                printf("%02x ", (unsigned char)((char*)response_mapped_memory)[i]);
                 if ((i + 1) % 16 == 0) printf("\n[WINDOWS_SERVICE]            ");
             }
             printf("\n");
@@ -1925,149 +2014,34 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         if (response_data_size > 0) {
             printf("[WINDOWS_SERVICE] Response written directly to shared memory (%zu bytes)\n",
                    response_data_size);
-
-                // Write response data to file
-                HANDLE response_file = CreateFileA(response_file_path,
-                                                 GENERIC_WRITE,
-                                                 0,
-                                                 NULL,
-                                                 CREATE_ALWAYS,
-                                                 FILE_ATTRIBUTE_NORMAL,
-                                                 NULL);
-
-                if (response_file != INVALID_HANDLE_VALUE) {
-                    printf("[WINDOWS_SERVICE] About to write %zu bytes to file: %s\n", response_data_size, response_file_path);
-
-                    DWORD bytes_written;
-                    BOOL write_success = WriteFile(response_file,
-                                                  response_buffer,
-                                                  (DWORD)response_data_size,
-                                                  &bytes_written,
-                                                  NULL);
-
-                    printf("[WINDOWS_SERVICE] WriteFile result: success=%d, requested=%zu, written=%lu\n",
-                           write_success, response_data_size, bytes_written);
-
-                    // Force sync response data to disk before WSL2 client reads it
-                    if (write_success) {
-                        BOOL flush_success = FlushFileBuffers(response_file);
-                        if (!flush_success) {
-                            printf("[ERROR] FlushFileBuffers failed for response (error: %lu)\n", GetLastError());
-                        } else {
-                            printf("[WINDOWS_SERVICE] FlushFileBuffers succeeded\n");
-                        }
-                    } else {
-                        printf("[ERROR] WriteFile failed for response (error: %lu)\n", GetLastError());
-                    }
-
-                    CloseHandle(response_file);
-
-                    // Verify file was written correctly by reading it back
-                    HANDLE verify_file = CreateFileA(response_file_path,
-                                                    GENERIC_READ,
-                                                    FILE_SHARE_READ,
-                                                    NULL,
-                                                    OPEN_EXISTING,
-                                                    FILE_ATTRIBUTE_NORMAL,
-                                                    NULL);
-
-                    if (verify_file != INVALID_HANDLE_VALUE) {
-                        DWORD file_size = GetFileSize(verify_file, NULL);
-                        printf("[WINDOWS_SERVICE] File verification: size=%lu bytes\n", file_size);
-
-                        if (file_size >= 20) {
-                            BYTE verify_buffer[20];
-                            DWORD bytes_read;
-                            if (ReadFile(verify_file, verify_buffer, 20, &bytes_read, NULL)) {
-                                printf("[WINDOWS_SERVICE] File content verification (first 20 bytes): ");
-                                for (DWORD i = 0; i < bytes_read; i++) {
-                                    printf("%02x ", verify_buffer[i]);
-                                    if ((i + 1) % 16 == 0) printf("\n[WINDOWS_SERVICE]                                              ");
-                                }
-                                printf("\n");
-                            }
-                        }
-                        CloseHandle(verify_file);
-                    }
-
-                    if (write_success && bytes_written == response_data_size) {
-                        // Convert back to Linux path for client using C strings
-                        char linux_response_path[512];
-                        if (strncmp(response_file_path, "C:", 2) == 0) {
-                            snprintf(linux_response_path, sizeof(linux_response_path), "/mnt/c%s", response_file_path + 2);
-                            // Replace \ with /
-                            for (char* p = linux_response_path; *p; p++) {
-                                if (*p == '\\') *p = '/';
-                            }
-                        } else {
-                            strncpy(linux_response_path, response_file_path, sizeof(linux_response_path) - 1);
-                            linux_response_path[sizeof(linux_response_path) - 1] = '\0';
-                        }
-                        // Store the response file path for JSON response
-                        strncpy(g_response_file_path, linux_response_path, sizeof(g_response_file_path) - 1);
-                        g_response_file_path[sizeof(g_response_file_path) - 1] = '\0';
-                    } else {
-                        printf("[ERROR] Failed to write response data (wrote %lu of %zu bytes)\n",
-                               bytes_written, response_data_size);
-                    }
-                } else {
-                    printf("[ERROR] Failed to create response file: %s (error: %lu)\n",
-                           response_file_path, GetLastError());
-                }
         } else {
             printf("[WINDOWS_SERVICE] No response data to write (response_data_size=0)\n");
         }
     } else {
-        // Error - still need to create response file with error information
+        // Error handling for dispatch failures
         printf("[ERROR] APIR command failed with code: %u\n", dispatch_result);
+    }
+    // No cleanup needed - reusing existing buffer mapping from registration
 
-        // Create response file with error code
-        char response_file_path[512];
-        strncpy(response_file_path, windows_path, sizeof(response_file_path) - 20);
-        response_file_path[sizeof(response_file_path) - 20] = '\0';
+    printf("[DEBUG] HandleAPIRAPI: About to show final buffer content\n");
 
-        // Add _response suffix
-        char* dot = strrchr(response_file_path, '.');
-        if (dot) {
-            strcpy(dot, "_response.dat");
-        } else {
-            strcat(response_file_path, "_response");
-        }
+    // Final instrumentation: Show exactly what the guest will read
+    printf("[WINDOWS_SERVICE] === FINAL BUFFER CONTENT BEFORE GUEST READS ===\n");
+    printf("[WINDOWS_SERVICE] Buffer address: %p\n", response_mapped_memory);
+    printf("[WINDOWS_SERVICE] Buffer size: %zu bytes\n", response_buffer_size);
 
-        // Write error response (empty file or error code)
-        HANDLE response_file = CreateFileA(response_file_path,
-                                         GENERIC_WRITE,
-                                         0,
-                                         NULL,
-                                         CREATE_ALWAYS,
-                                         FILE_ATTRIBUTE_NORMAL,
-                                         NULL);
+    size_t display_size = (response_buffer_size > 64) ? 64 : response_buffer_size;
+    printf("[WINDOWS_SERVICE] Content (first %zu bytes):\n", display_size);
+    printf("[WINDOWS_SERVICE] ");
 
-        if (response_file != INVALID_HANDLE_VALUE) {
-            // Write error code as response
-            DWORD bytes_written;
-            BOOL write_success = WriteFile(response_file, &dispatch_result, sizeof(dispatch_result), &bytes_written, NULL);
-
-            if (write_success) {
-                BOOL flush_success = FlushFileBuffers(response_file);
-                if (!flush_success) {
-                    printf("[ERROR] FlushFileBuffers failed for error response (error: %lu)\n", GetLastError());
-                }
-            } else {
-                printf("[ERROR] WriteFile failed for error response (error: %lu)\n", GetLastError());
-            }
-
-            CloseHandle(response_file);
-
-            printf("[WINDOWS_SERVICE] Created error response file: %s\n", response_file_path);
-        } else {
-            printf("[ERROR] Failed to create error response file: %s\n", response_file_path);
+    for (size_t i = 0; i < display_size; i++) {
+        printf("%02x ", (unsigned char)((char*)response_mapped_memory)[i]);
+        if ((i + 1) % 16 == 0) {
+            printf("\n[WINDOWS_SERVICE] ");
         }
     }
-
-    // Don't touch Json::Value objects at all - return special success code for manual JSON handling
-
-    // No cleanup needed - reusing existing buffer mapping from registration
+    printf("\n");
+    printf("[WINDOWS_SERVICE] === END BUFFER CONTENT ===\n");
 
     fflush(stdout);
     // Return special code to indicate success but avoid Json::Value serialization
@@ -2081,15 +2055,24 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response) {
     UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
 
+    printf("[BUFFER_REGISTRATION] *** ENTRY *** request_id=%u, buffer_id=%u, file_path=%s\n",
+           request_id, buffer_id, file_path.c_str());
+
     std::lock_guard<std::mutex> lock(g_buffer_mutex);
 
     // Get session ID from client socket - same logic as APIR commands
     uint32_t session_id = get_client_session_id(client_socket);
 
+    printf("[DEBUG] HandleBufferRegistrationAPI: session_id=%u, buffer_id=%u, file_path=%s\n",
+           session_id, buffer_id, file_path.c_str());
+
     // Get or create client session
     auto& session = g_client_sessions[session_id];
     if (session.session_id == 0) {
         session.session_id = session_id;
+        printf("[DEBUG] HandleBufferRegistrationAPI: Created new session %u\n", session_id);
+    } else {
+        printf("[DEBUG] HandleBufferRegistrationAPI: Using existing session %u\n", session_id);
     }
 
     // Check if buffer ID already exists for this session
@@ -2174,6 +2157,126 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
     mapping.file_path = file_path;
 
     session.buffers[buffer_id] = mapping;
+
+    printf("[DEBUG] HandleBufferRegistrationAPI: Successfully registered buffer %u in session %u (address=%p, size=%zu)\n",
+           buffer_id, session_id, mapped_memory, (size_t)file_size.QuadPart);
+
+    return ERROR_SUCCESS;
+}
+
+/*
+ * Buffer Allocation API Handler
+ * Allocates a new buffer and returns the buffer ID and file path to the client
+ */
+DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response) {
+    UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
+
+    UINT32 request_id = request.get("request_id", 0).asUInt();
+    UINT64 buffer_size = request.get("buffer_size", 0).asUInt64();
+
+    printf("[BUFFER_ALLOCATION] *** ENTRY *** request_id=%u, buffer_size=%I64u\n",
+           request_id, buffer_size);
+
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    // Get session ID from client socket
+    uint32_t session_id = get_client_session_id(client_socket);
+
+    // Get or create client session
+    auto& session = g_client_sessions[session_id];
+    session.session_id = session_id;
+
+    // Generate unique buffer ID for this session
+    uint32_t buffer_id = 1;
+    while (session.buffers.find(buffer_id) != session.buffers.end()) {
+        buffer_id++;
+    }
+
+    // Generate unique file path
+    char file_path[512];
+    snprintf(file_path, sizeof(file_path), "C:\\temp\\ggml_shared_%u_%u_%I64u.dat",
+             session_id, buffer_id, buffer_size);
+
+    printf("[DEBUG] HandleBufferAllocationAPI: session_id=%u, allocating buffer_id=%u, file_path=%s\n",
+           session_id, buffer_id, file_path);
+
+    // Create the file
+    HANDLE file_handle = CreateFileA(
+        file_path,
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        printf("[ERROR] HandleBufferAllocationAPI: Failed to create file %s, error=%lu\n", file_path, error);
+        return ERROR_FILE_NOT_FOUND;
+    }
+
+    // Set file size
+    LARGE_INTEGER file_size_li;
+    file_size_li.QuadPart = buffer_size;
+    if (SetFilePointerEx(file_handle, file_size_li, NULL, FILE_BEGIN) == FALSE ||
+        SetEndOfFile(file_handle) == FALSE) {
+        DWORD error = GetLastError();
+        printf("[ERROR] HandleBufferAllocationAPI: Failed to set file size, error=%lu\n", error);
+        CloseHandle(file_handle);
+        DeleteFileA(file_path);
+        return ERROR_FILE_INVALID;
+    }
+
+    // Create file mapping
+    HANDLE mapping_handle = CreateFileMappingA(
+        file_handle,
+        NULL,
+        PAGE_READWRITE,
+        file_size_li.HighPart,
+        file_size_li.LowPart,
+        NULL
+    );
+
+    if (mapping_handle == NULL) {
+        DWORD error = GetLastError();
+        printf("[ERROR] HandleBufferAllocationAPI: Failed to create file mapping, error=%lu\n", error);
+        CloseHandle(file_handle);
+        DeleteFileA(file_path);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Map the file into memory
+    void* mapped_memory = MapViewOfFile(
+        mapping_handle,
+        FILE_MAP_ALL_ACCESS,
+        0,
+        0,
+        (SIZE_T)buffer_size
+    );
+
+    if (mapped_memory == NULL) {
+        DWORD error = GetLastError();
+        printf("[ERROR] HandleBufferAllocationAPI: Failed to map file view, error=%lu\n", error);
+        CloseHandle(mapping_handle);
+        CloseHandle(file_handle);
+        DeleteFileA(file_path);
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Store buffer mapping
+    BufferMapping mapping;
+    mapping.file_handle = file_handle;
+    mapping.mapping_handle = mapping_handle;
+    mapping.mapped_memory = mapped_memory;
+    mapping.size = (size_t)buffer_size;
+    mapping.file_path = file_path;
+
+    session.buffers[buffer_id] = mapping;
+
+    printf("[DEBUG] HandleBufferAllocationAPI: Successfully allocated buffer %u in session %u (address=%p, size=%I64u)\n",
+           buffer_id, session_id, mapped_memory, buffer_size);
 
     return ERROR_SUCCESS;
 }

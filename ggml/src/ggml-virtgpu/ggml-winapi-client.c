@@ -267,6 +267,9 @@ int ggml_winapi_alloc_shared_buffer(ggml_winapi_handle_t handle,
     buffer->size = size;
     buffer->buffer_id = ctx->next_buffer_id - 1;
 
+    printf("[GUEST_BUFFER] Created buffer: ID=%u, size=%zu, file_path=%s\n",
+           buffer->buffer_id, buffer->size, buffer->file_path);
+
     return GGML_WINAPI_OK;
 }
 
@@ -315,6 +318,9 @@ int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
              "}",
              buffer->buffer_id, buffer->file_path, buffer->size);
 
+    printf("[GUEST_BUFFER] Registering buffer: ID=%u, file_path=%s, size=%zu\n",
+           buffer->buffer_id, buffer->file_path, buffer->size);
+
     /* Send registration request */
     int ret = winapi_send_json_message(ctx->socket_fd, json_string);
     if (ret != 0) {
@@ -362,25 +368,51 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
 
     ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
 
-    /* Create shared buffer for APIR data */
-    ggml_winapi_shared_buffer_t apir_buffer;
-    int ret = ggml_winapi_alloc_shared_buffer(handle, apir_size, &apir_buffer);
-    if (ret != GGML_WINAPI_OK) {
-        return ret;
+    /* Use pre-allocated paired buffers: Buffer 2 (command) → Buffer 1 (reply) */
+    uint32_t command_buffer_id = 2;  // 4KB pre-allocated command buffer
+    uint32_t reply_buffer_id = 1;    // 16MB pre-allocated reply buffer
+
+    /* Write APIR data directly to the command buffer (buffer 2) shared memory file */
+    char command_buffer_path[512];
+    snprintf(command_buffer_path, sizeof(command_buffer_path), "/mnt/c/temp/ggml_shared_2_4096.dat");
+
+    /* Open and map the pre-allocated command buffer */
+    int command_fd = open(command_buffer_path, O_RDWR);
+    if (command_fd < 0) {
+        fprintf(stderr, "ggml-winapi: Failed to open command buffer %s: %s\n",
+                command_buffer_path, strerror(errno));
+        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
     }
 
-    /* Copy APIR data into shared buffer */
-    memcpy(apir_buffer.data, apir_data, apir_size);
+    void* command_data = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, command_fd, 0);
+    if (command_data == MAP_FAILED) {
+        fprintf(stderr, "ggml-winapi: Failed to map command buffer: %s\n", strerror(errno));
+        close(command_fd);
+        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
+    }
 
-    /* Force sync memory-mapped data to disk before Windows service reads it */
-    if (msync(apir_buffer.data, apir_size, MS_SYNC) != 0) {
+    /* Copy APIR data into the command buffer */
+    if (apir_size > 4096) {
+        fprintf(stderr, "ggml-winapi: APIR data size %zu exceeds command buffer size 4096\n", apir_size);
+        munmap(command_data, 4096);
+        close(command_fd);
+        return GGML_WINAPI_ERROR_INVALID_PARAMS;
+    }
+
+    memcpy(command_data, apir_data, apir_size);
+
+    /* Force sync to disk */
+    if (msync(command_data, apir_size, MS_SYNC) != 0) {
         fprintf(stderr, "ggml-winapi: Warning: msync failed: %s\n", strerror(errno));
     }
 
-    /* Also sync the file descriptor */
-    if (fsync(apir_buffer.fd) != 0) {
+    if (fsync(command_fd) != 0) {
         fprintf(stderr, "ggml-winapi: Warning: fsync failed: %s\n", strerror(errno));
     }
+
+    /* Clean up command buffer mapping - Windows service will read from the file */
+    munmap(command_data, 4096);
+    close(command_fd);
 
     /* Extract command type from APIR binary data */
     uint32_t cmd_type = 22;  // Default fallback
@@ -389,7 +421,7 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
         memcpy(&cmd_type, apir_data, sizeof(uint32_t));
     }
 
-    /* Create JSON command message */
+    /* Create JSON command message using pre-allocated paired buffers */
     char json_string[2048];
     snprintf(json_string, sizeof(json_string),
              "{"
@@ -398,15 +430,18 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
              "\"apir_cmd_type\":%u,"
              "\"apir_data_size\":%zu,"
              "\"shared_file_path\":\"%s\","
-             "\"buffer_id\":%u"
+             "\"buffer_id\":%u,"
+             "\"response_buffer_id\":%u"
              "}",
-             cmd_type, apir_size, apir_buffer.file_path, apir_buffer.buffer_id);
+             cmd_type, apir_size, command_buffer_path, command_buffer_id, reply_buffer_id);
+
+    printf("[GUEST] APIR command: input_buffer=%u, response_buffer=%u\n",
+           command_buffer_id, reply_buffer_id);
 
     /* Send JSON command over socket */
-    ret = winapi_send_json_message(ctx->socket_fd, json_string);
+    int ret = winapi_send_json_message(ctx->socket_fd, json_string);
 
     if (ret != 0) {
-        ggml_winapi_free_shared_buffer(&apir_buffer);
         return GGML_WINAPI_ERROR_SEND_FAILED;
     }
 
@@ -414,7 +449,6 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     char response_json[4096];
     int response_len = winapi_receive_response(ctx->socket_fd, response_json, sizeof(response_json));
     if (response_len <= 0) {
-        ggml_winapi_free_shared_buffer(&apir_buffer);
         return GGML_WINAPI_ERROR_SEND_FAILED;
     }
 
@@ -422,7 +456,6 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     char status_str[64] = "error";
     int error_code = 1;
     size_t actual_response_size = 0;
-    char response_file_path[512] = "";
 
     /* Look for status field */
     char* status_ptr = strstr(response_json, "\"status\":");
@@ -455,62 +488,37 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
         actual_response_size = strtoull(response_size_ptr, NULL, 10);
     }
 
-    /* Look for response_file_path field */
-    char* file_path_ptr = strstr(response_json, "\"response_file_path\":");
-    if (file_path_ptr) {
-        file_path_ptr += 21; /* skip "response_file_path": */
-        while (*file_path_ptr == ' ' || *file_path_ptr == '\t') {
-            file_path_ptr++; /* skip whitespace */
-        }
-        if (*file_path_ptr == '"') {
-            file_path_ptr++;
-            char* file_path_end = strchr(file_path_ptr, '"');
-            if (file_path_end && (size_t)(file_path_end - file_path_ptr) < sizeof(response_file_path) - 1) {
-                strncpy(response_file_path, file_path_ptr, file_path_end - file_path_ptr);
-                response_file_path[file_path_end - file_path_ptr] = '\0';
-            }
-        }
-    }
-
-    /* Handle successful response with binary data */
+    /* Handle response using pre-allocated paired buffers (option 3) */
     if (strcmp(status_str, "success") == 0 && error_code == 0) {
-        if (strlen(response_file_path) > 0) {
-            /* Check if response file exists before attempting to open */
-            if (access(response_file_path, F_OK) != 0) {
-                fprintf(stderr, "ggml-winapi: Response file does not exist: %s\n", response_file_path);
-                fprintf(stderr, "ggml-winapi: This likely means the Windows service crashed or failed to process the request\n");
-                *response_size = 0;
-                ret = GGML_WINAPI_ERROR_SEND_FAILED;
-                return ret;
-            }
+        if (actual_response_size > 0) {
+            /* Read response from pre-allocated reply buffer (Buffer 1) */
+            char reply_buffer_path[512];
+            snprintf(reply_buffer_path, sizeof(reply_buffer_path), "/mnt/c/temp/ggml_shared_1_16777216.dat");
 
-            /* Read binary response data from file */
-            int response_fd = open(response_file_path, O_RDONLY);
-            if (response_fd >= 0) {
+            int reply_fd = open(reply_buffer_path, O_RDONLY);
+            if (reply_fd >= 0) {
                 size_t bytes_to_read = (actual_response_size < response_buffer_size) ?
                                        actual_response_size : response_buffer_size;
-                ssize_t bytes_read = read(response_fd, response_buffer, bytes_to_read);
-                close(response_fd);
+                ssize_t bytes_read = read(reply_fd, response_buffer, bytes_to_read);
+                close(reply_fd);
 
                 if (bytes_read > 0) {
                     *response_size = bytes_read;
-
-                    /* Clean up response file */
-                    unlink(response_file_path);
+                    ret = GGML_WINAPI_OK;
                 } else {
-                    fprintf(stderr, "ggml-winapi: Failed to read response data from %s\n", response_file_path);
+                    fprintf(stderr, "ggml-winapi: Failed to read response from reply buffer\n");
                     *response_size = 0;
                     ret = GGML_WINAPI_ERROR_SEND_FAILED;
                 }
             } else {
-                fprintf(stderr, "ggml-winapi: Failed to open response file: %s\n", response_file_path);
-                perror("ggml-winapi: open() error");
+                fprintf(stderr, "ggml-winapi: Failed to open reply buffer: %s\n", strerror(errno));
                 *response_size = 0;
                 ret = GGML_WINAPI_ERROR_SEND_FAILED;
             }
         } else {
-            /* Success but no response data (command completed with empty result) */
+            /* Success with empty response */
             *response_size = 0;
+            ret = GGML_WINAPI_OK;
         }
     } else {
         /* Error case */
@@ -524,7 +532,7 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
             ret = GGML_WINAPI_ERROR_UNKNOWN;
         }
     }
-    ggml_winapi_free_shared_buffer(&apir_buffer);
+
     return ret;
 }
 
