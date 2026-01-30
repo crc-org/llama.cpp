@@ -406,6 +406,38 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
         fprintf(stderr, "ggml-winapi: APIR data size %zu exceeds command buffer size 4096\n", apir_size);
         return GGML_WINAPI_ERROR_INVALID_PARAMS;
     }
+
+/* if FORCE_FLUSH_COMMAND_BUFFER == 0
+  ==> failing on: apir_device_get_description: string size too short (1), aborting
+  ==> this means that the host receives an outdated view of the command buffer, and fill the answer of the the device_get_count command
+*/
+
+/* if FORCE_FLUSH_COMMAND_BUFFER == 1
+   ==> failing on [FRONTEND] FATAL: Backend reported 46 devices - abnormal! Expected 1-2 maximum. Terminating.
+   ==> this means that the guest sees an outdated response buffer
+*/
+
+#define FORCE_FLUSH_COMMAND_BUFFER 1
+
+#if FORCE_FLUSH_COMMAND_BUFFER == 1
+    /*
+     * We need to sync the command buffer to ensure Windows service sees the data.
+     * Open the file briefly to get an FD for fsync, but don't remap it.
+     */
+    int command_fd = open(ctx->command_buffer.file_path, O_RDWR);
+    if (command_fd < 0) {
+        fprintf(stderr, "ggml-winapi: Failed to open command buffer %s for sync: %s\n",
+                ctx->command_buffer.file_path, strerror(errno));
+        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
+    }
+
+    /* Force sync to ensure Windows service sees the encoder data */
+    if (fsync(command_fd) != 0) {
+        fprintf(stderr, "ggml-winapi: Warning: fsync failed: %s\n", strerror(errno));
+    }
+
+    close(command_fd);
+#endif
     /* Extract command type from APIR binary data */
     uint32_t cmd_type = 22;  // Default fallback
     if (apir_size >= sizeof(uint32_t)) {

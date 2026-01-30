@@ -34,7 +34,7 @@ int apir_device_get_count(virtgpu * gpu) {
         printf("[FRONTEND] FATAL: Backend reported %d devices - abnormal! Expected 1-2 maximum. Terminating.\n", dev_count);
         exit(1);
     }
-
+    printf("[FRONTEND] INFO: Backend reported %d devices.\n", dev_count);
     return dev_count;
 }
 
@@ -69,6 +69,10 @@ char * apir_device_get_description(virtgpu * gpu) {
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
+    if (string_size < 5) {
+        printf("%s: string size too short (%ld), aborting\n", __func__, string_size);
+        _exit(1);
+    }
     char *       string      = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
     if (!string) {
         printf("%s: Could not allocate the device description buffer\n", __func__);

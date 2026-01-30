@@ -166,6 +166,11 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
 
     backend_dispatch_t forward_fct = apir_backend_dispatch_table[cmd_type];
 
+    // Log the method being called for debugging
+    const char * method_name = backend_dispatch_command_name((ApirBackendCommandType)cmd_type);
+    printf("[BACKEND_DISPATCHER] Calling method: %s (cmd_type=%d)\n", method_name, cmd_type);
+    fflush(stdout);
+
     // Call backend function to encode actual data
     uint32_t ret = forward_fct(&enc, &dec, &ctx);
 

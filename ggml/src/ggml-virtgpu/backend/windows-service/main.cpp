@@ -1909,6 +1909,9 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     void* input_mapped_memory = input_buffer_mapping.mapped_memory;
     size_t input_buffer_size = input_buffer_mapping.size;
 
+    // Force Windows cache coherency - ensure we read fresh data from WSL2 guest
+    FlushViewOfFile(input_mapped_memory, input_buffer_size);
+
     if (apir_data_size > input_buffer_size) {
         printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
         return ERROR_INVALID_PARAMETER;
@@ -1968,6 +1971,10 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     *(uint32_t*)response_mapped_memory = dispatch_result;
     enc_cur_after += sizeof(uint32_t);
 
+    // Force Windows cache coherency - ensure WSL2 guest sees fresh response data
+    size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
+    FlushViewOfFile(response_mapped_memory, total_response_size);
+
     // Avoid Json::Value objects completely - return success code for manual JSON handling
     // No cleanup needed - reusing existing buffer mapping from registration
 
@@ -1982,24 +1989,15 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response) {
     UNREFERENCED_PARAMETER(response);  // We'll bypass Json::Value to avoid crashes
 
-    printf("[BUFFER_REGISTRATION] *** ENTRY *** request_id=%u, buffer_id=%u, file_path=%s\n",
-           request_id, buffer_id, file_path.c_str());
-
     std::lock_guard<std::mutex> lock(g_buffer_mutex);
 
     // Get session ID from client socket - same logic as APIR commands
     uint32_t session_id = get_client_session_id(client_socket);
 
-    printf("[DEBUG] HandleBufferRegistrationAPI: session_id=%u, buffer_id=%u, file_path=%s\n",
-           session_id, buffer_id, file_path.c_str());
-
     // Get or create client session
     auto& session = g_client_sessions[session_id];
     if (session.session_id == 0) {
         session.session_id = session_id;
-        printf("[DEBUG] HandleBufferRegistrationAPI: Created new session %u\n", session_id);
-    } else {
-        printf("[DEBUG] HandleBufferRegistrationAPI: Using existing session %u\n", session_id);
     }
 
     // Check if buffer ID already exists for this session
@@ -2085,9 +2083,6 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
 
     session.buffers[buffer_id] = mapping;
 
-    printf("[DEBUG] HandleBufferRegistrationAPI: Successfully registered buffer %u in session %u (address=%p, size=%zu)\n",
-           buffer_id, session_id, mapped_memory, (size_t)file_size.QuadPart);
-
     return ERROR_SUCCESS;
 }
 
@@ -2100,9 +2095,6 @@ DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request
 
     UINT32 request_id = request.get("request_id", 0).asUInt();
     UINT64 buffer_size = request.get("buffer_size", 0).asUInt64();
-
-    printf("[BUFFER_ALLOCATION] *** ENTRY *** request_id=%u, buffer_size=%I64u\n",
-           request_id, buffer_size);
 
     std::lock_guard<std::mutex> lock(g_buffer_mutex);
 
