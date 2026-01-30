@@ -11,6 +11,7 @@
 #include "backend/shared/api_remoting.h"
 #include "./apir-minimal.h"
 #include "ggml.h"
+#include "ggml-impl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,14 +113,37 @@ static virtgpu* windows_create(void) {
     /* Set APIR capabilities */
     gpu->use_apir_capset = getenv("GGML_REMOTING_USE_APIR_CAPSET") != NULL;
 
+    /* Register persistent buffers with Windows API client for consistent usage */
+    virtgpu_windows_shmem_data* reply_data = (virtgpu_windows_shmem_data*)gpu->reply_shmem.backend_data;
+    virtgpu_windows_shmem_data* command_data = (virtgpu_windows_shmem_data*)gpu->command_shmem.backend_data;
+
+    int buffer_reg_ret = ggml_winapi_set_apir_buffers(win_data->winapi_handle,
+                                                      &reply_data->buffer,
+                                                      &command_data->buffer);
+    if (buffer_reg_ret != GGML_WINAPI_OK) {
+        fprintf(stderr, "Failed to register persistent APIR buffers with client\n");
+        windows_shmem_destroy(gpu, &gpu->command_shmem);
+        windows_shmem_destroy(gpu, &gpu->reply_shmem);
+        ggml_winapi_cleanup(win_data->winapi_handle);
+        free(win_data);
+        free(gpu);
+        return NULL;
+    }
+
     /* Set backend information */
     gpu->backend_type = VIRTGPU_BACKEND_WINDOWS_WINAPI;
     gpu->ops = virtgpu_backend_windows_winapi_get_ops();  // Set ops after structure definition
 
-    GGML_LOG_INFO("Windows initialization complete\n");
-    GGML_LOG_INFO("  Reply buffer:   %zu MB\n", WINAPI_REPLY_BUFFER_SIZE / (1024*1024));
-    GGML_LOG_INFO("  Command buffer: %zu KB\n", gpu->command_shmem.mmap_size / 1024);
-    GGML_LOG_INFO("  Data buffers:   Dynamic allocation\n");
+    printf("Windows initialization complete\n");
+    printf("  Reply buffer:   %zu MB (ID=%u, file=%s)\n",
+           WINAPI_REPLY_BUFFER_SIZE / (1024*1024),
+           reply_data->buffer.buffer_id,
+           reply_data->buffer.file_path);
+    printf("  Command buffer: %zu KB (ID=%u, file=%s)\n",
+           gpu->command_shmem.mmap_size / 1024,
+           command_data->buffer.buffer_id,
+           command_data->buffer.file_path);
+    printf("  Data buffers:   Dynamic allocation\n");
 
     return gpu;
 }
@@ -225,7 +249,6 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
     if (!reply_ptr) {
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
-
 
     /* Initialize decoder with reply buffer */
     *dec = apir_decoder_init(reply_ptr, reply_size);

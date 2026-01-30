@@ -1987,12 +1987,30 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     // Prepend APIR return code to response (Windows-specific APIR protocol layer)
     size_t backend_data_size = enc_cur_after - (char*)response_mapped_memory;
     memmove((char*)response_mapped_memory + sizeof(uint32_t), response_mapped_memory, backend_data_size);
+
+    // Debug: Show what the backend dispatcher wrote to response buffer
+    printf("[WINDOWS_SERVICE] Backend wrote %zu bytes to response buffer (before prepending return code)\n", backend_data_size);
+    printf("[WINDOWS_SERVICE] Backend data (first 16 bytes): ");
+    unsigned char* backend_bytes = (unsigned char*)((char*)response_mapped_memory + sizeof(uint32_t));
+    for (size_t i = 0; i < 16 && i < backend_data_size; i++) {
+        printf("%02x ", backend_bytes[i]);
+    }
+    printf("\n");
     *(uint32_t*)response_mapped_memory = dispatch_result;
     enc_cur_after += sizeof(uint32_t);
 
     printf("[WINDOWS_SERVICE] Added APIR return code ({%d}) to response, total size: %zu\n",
            dispatch_result,
            enc_cur_after - (char*)response_mapped_memory);
+
+    // Debug: Show final complete response after return code added
+    size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
+    printf("[WINDOWS_SERVICE] Final complete response (first 16 bytes): ");
+    unsigned char* complete_response = (unsigned char*)response_mapped_memory;
+    for (size_t i = 0; i < 16 && i < total_response_size; i++) {
+        printf("%02x ", complete_response[i]);
+    }
+    printf("\n");
 
     // Avoid Json::Value objects completely - return success code for manual JSON handling
 

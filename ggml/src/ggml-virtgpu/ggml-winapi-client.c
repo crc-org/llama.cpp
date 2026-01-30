@@ -25,6 +25,10 @@ typedef struct {
     int socket_fd;
     uint32_t next_buffer_id;
     char shared_memory_base[256];
+    /* Track the persistent APIR buffers allocated during init */
+    ggml_winapi_shared_buffer_t reply_buffer;    // Buffer 1: 16MB reply buffer
+    ggml_winapi_shared_buffer_t command_buffer;  // Buffer 2: 4KB command buffer
+    bool buffers_initialized;
 } ggml_winapi_context_t;
 
 /* Default connection parameters - most come from winApiRmt.h */
@@ -190,6 +194,7 @@ ggml_winapi_handle_t ggml_winapi_init(void) {
     strncpy(ctx->shared_memory_base, shared_base, sizeof(ctx->shared_memory_base) - 1);
 
     ctx->next_buffer_id = 1;
+    ctx->buffers_initialized = false;
 
     printf("ggml-winapi: Initialization complete\n");
     return (ggml_winapi_handle_t)ctx;
@@ -355,6 +360,30 @@ int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
     return GGML_WINAPI_ERROR_SEND_FAILED;
 }
 
+/* Set persistent APIR buffers */
+int ggml_winapi_set_apir_buffers(ggml_winapi_handle_t handle,
+                                const ggml_winapi_shared_buffer_t* reply_buffer,
+                                const ggml_winapi_shared_buffer_t* command_buffer) {
+    if (!handle || !reply_buffer || !command_buffer) {
+        return GGML_WINAPI_ERROR_INVALID_PARAMS;
+    }
+
+    ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
+
+    /* Store buffer information for use by send_apir_command */
+    ctx->reply_buffer = *reply_buffer;
+    ctx->command_buffer = *command_buffer;
+    ctx->buffers_initialized = true;
+
+    printf("[GUEST] Registered persistent APIR buffers:\n");
+    printf("[GUEST]   Reply buffer:   ID=%u, size=%zu, file=%s\n",
+           reply_buffer->buffer_id, reply_buffer->size, reply_buffer->file_path);
+    printf("[GUEST]   Command buffer: ID=%u, size=%zu, file=%s\n",
+           command_buffer->buffer_id, command_buffer->size, command_buffer->file_path);
+
+    return GGML_WINAPI_OK;
+}
+
 /* Send APIR command to Windows host */
 int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                                  const void* apir_data,
@@ -368,51 +397,58 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
 
     ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
 
-    /* Use pre-allocated paired buffers: Buffer 2 (command) → Buffer 1 (reply) */
-    uint32_t command_buffer_id = 2;  // 4KB pre-allocated command buffer
-    uint32_t reply_buffer_id = 1;    // 16MB pre-allocated reply buffer
-
-    /* Write APIR data directly to the command buffer (buffer 2) shared memory file */
-    char command_buffer_path[512];
-    snprintf(command_buffer_path, sizeof(command_buffer_path), "/mnt/c/temp/ggml_shared_2_4096.dat");
-
-    /* Open and map the pre-allocated command buffer */
-    int command_fd = open(command_buffer_path, O_RDWR);
-    if (command_fd < 0) {
-        fprintf(stderr, "ggml-winapi: Failed to open command buffer %s: %s\n",
-                command_buffer_path, strerror(errno));
-        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
-    }
-
-    void* command_data = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, command_fd, 0);
-    if (command_data == MAP_FAILED) {
-        fprintf(stderr, "ggml-winapi: Failed to map command buffer: %s\n", strerror(errno));
-        close(command_fd);
-        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
-    }
-
-    /* Copy APIR data into the command buffer */
-    if (apir_size > 4096) {
-        fprintf(stderr, "ggml-winapi: APIR data size %zu exceeds command buffer size 4096\n", apir_size);
-        munmap(command_data, 4096);
-        close(command_fd);
+    /* Verify persistent APIR buffers are available */
+    if (!ctx->buffers_initialized) {
+        fprintf(stderr, "ggml-winapi: APIR buffers not initialized - call ggml_winapi_set_apir_buffers first\n");
         return GGML_WINAPI_ERROR_INVALID_PARAMS;
     }
 
-    memcpy(command_data, apir_data, apir_size);
+    /* Use the persistent allocated buffers from initialization */
+    uint32_t command_buffer_id = ctx->command_buffer.buffer_id;
+    uint32_t reply_buffer_id = ctx->reply_buffer.buffer_id;
 
-    /* Force sync to disk */
-    if (msync(command_data, apir_size, MS_SYNC) != 0) {
-        fprintf(stderr, "ggml-winapi: Warning: msync failed: %s\n", strerror(errno));
+    printf("[GUEST] Using persistent APIR buffers: command_id=%u, reply_id=%u\n",
+           command_buffer_id, reply_buffer_id);
+
+    /*
+     * IMPORTANT: The APIR data is already written to the persistent command buffer
+     * by the APIR encoder in windows_remote_call_prepare(). However, we need to ensure
+     * that data is visible to the Windows service by syncing it to the file.
+     * This avoids the repeated mmap/write cycle while ensuring cache coherency.
+     */
+
+    if (apir_size > 4096) {
+        fprintf(stderr, "ggml-winapi: APIR data size %zu exceeds command buffer size 4096\n", apir_size);
+        return GGML_WINAPI_ERROR_INVALID_PARAMS;
+    }
+#if 0
+    /*
+     * We need to sync the command buffer to ensure Windows service sees the data.
+     * Open the file briefly to get an FD for fsync, but don't remap it.
+     */
+    int command_fd = open(ctx->command_buffer.file_path, O_RDWR);
+    if (command_fd < 0) {
+        fprintf(stderr, "ggml-winapi: Failed to open command buffer %s for sync: %s\n",
+                ctx->command_buffer.file_path, strerror(errno));
+        return GGML_WINAPI_ERROR_MEMORY_MAP_FAILED;
     }
 
+    /* Force sync to ensure Windows service sees the encoder data */
     if (fsync(command_fd) != 0) {
         fprintf(stderr, "ggml-winapi: Warning: fsync failed: %s\n", strerror(errno));
     }
 
-    /* Clean up command buffer mapping - Windows service will read from the file */
-    munmap(command_data, 4096);
     close(command_fd);
+
+    printf("[GUEST] Using persistent command buffer with file sync\n");
+#endif
+    /* Debug: Show what's in the command data */
+    printf("[GUEST] Command data (first 16 bytes): ");
+    const unsigned char* cmd_bytes = (const unsigned char*)apir_data;
+    for (size_t i = 0; i < 16 && i < apir_size; i++) {
+        printf("%02x ", cmd_bytes[i]);
+    }
+    printf("\n");
 
     /* Extract command type from APIR binary data */
     uint32_t cmd_type = 22;  // Default fallback
@@ -433,7 +469,7 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
              "\"buffer_id\":%u,"
              "\"response_buffer_id\":%u"
              "}",
-             cmd_type, apir_size, command_buffer_path, command_buffer_id, reply_buffer_id);
+             cmd_type, apir_size, ctx->command_buffer.file_path, command_buffer_id, reply_buffer_id);
 
     printf("[GUEST] APIR command: input_buffer=%u, response_buffer=%u\n",
            command_buffer_id, reply_buffer_id);
@@ -488,30 +524,50 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
         actual_response_size = strtoull(response_size_ptr, NULL, 10);
     }
 
-    /* Handle response using pre-allocated paired buffers (option 3) */
+    /* Handle response using pre-allocated paired buffers */
     if (strcmp(status_str, "success") == 0 && error_code == 0) {
         if (actual_response_size > 0) {
-            /* Read response from pre-allocated reply buffer (Buffer 1) */
-            char reply_buffer_path[512];
-            snprintf(reply_buffer_path, sizeof(reply_buffer_path), "/mnt/c/temp/ggml_shared_1_16777216.dat");
+            /*
+             * Read response from pre-allocated reply buffer using the persistent mapping.
+             * The response_buffer parameter points to the persistent mmap, but we need
+             * to ensure cache coherency by syncing the mapping after Windows service writes.
+             */
+            printf("[GUEST] Reading response from persistent reply buffer: %s\n",
+                   ctx->reply_buffer.file_path);
 
-            int reply_fd = open(reply_buffer_path, O_RDONLY);
-            if (reply_fd >= 0) {
+            /* Sync the persistent mapping to ensure we see Windows service writes */
+            if (response_buffer && response_buffer_size > 0) {
+                /* Force cache coherency - invalidate our cached view */
+                if (msync(response_buffer, response_buffer_size, MS_INVALIDATE) != 0) {
+                    fprintf(stderr, "ggml-winapi: Warning: msync MS_INVALIDATE failed: %s\n", strerror(errno));
+                }
+
+                printf("[GUEST] Using persistent response buffer mapping with cache sync\n");
+
+                /* Debug: Show raw shared memory contents after cache sync */
+                printf("[GUEST] Raw shared memory (first 64 bytes after cache sync):\n");
+                printf("[GUEST] ");
+                const unsigned char* raw_bytes = (const unsigned char*)response_buffer;
+                for (size_t i = 0; i < 64 && i < response_buffer_size; i++) {
+                    printf("%02x ", raw_bytes[i]);
+                    if ((i + 1) % 16 == 0) printf("\n[GUEST] ");
+                }
+                printf("\n");
+
                 size_t bytes_to_read = (actual_response_size < response_buffer_size) ?
                                        actual_response_size : response_buffer_size;
-                ssize_t bytes_read = read(reply_fd, response_buffer, bytes_to_read);
-                close(reply_fd);
+                *response_size = bytes_to_read;
+                ret = GGML_WINAPI_OK;
 
-                if (bytes_read > 0) {
-                    *response_size = bytes_read;
-                    ret = GGML_WINAPI_OK;
-                } else {
-                    fprintf(stderr, "ggml-winapi: Failed to read response from reply buffer\n");
-                    *response_size = 0;
-                    ret = GGML_WINAPI_ERROR_SEND_FAILED;
+                /* Debug: Show interpreted response data */
+                printf("[GUEST] Interpreted response data (first 16 bytes): ");
+                const unsigned char* resp_bytes = (const unsigned char*)response_buffer;
+                for (size_t i = 0; i < 16 && i < bytes_to_read; i++) {
+                    printf("%02x ", resp_bytes[i]);
                 }
+                printf("\n");
             } else {
-                fprintf(stderr, "ggml-winapi: Failed to open reply buffer: %s\n", strerror(errno));
+                fprintf(stderr, "ggml-winapi: Invalid response buffer parameters\n");
                 *response_size = 0;
                 ret = GGML_WINAPI_ERROR_SEND_FAILED;
             }

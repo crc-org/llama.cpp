@@ -22,12 +22,26 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
+    printf("[BACKEND] ====> backend_device_get_count: Called\n");
+
     if (reg == NULL) {
+        printf("[BACKEND] ERROR: backend_device_get_count: reg is NULL\n");
         return 1;
     }
 
     int32_t dev_count = reg->iface.get_device_count(reg);
+    printf("[BACKEND] ====> backend_device_get_count: Registry reports %d devices\n", dev_count);
+
+    // INSTRUMENTATION: Exit if more than 2 devices found
+    if (dev_count > 2) {
+        printf("[BACKEND] FATAL: Found %d devices - this is abnormal! Expected 1-2 devices maximum.\n", dev_count);
+        printf("[BACKEND] FATAL: This suggests a serious backend registry error.\n");
+        printf("[BACKEND] FATAL: Terminating to prevent corruption.\n");
+        exit(1);
+    }
+
     apir_encode_int32_t(enc, &dev_count);
+    printf("[BACKEND] ====> backend_device_get_count: Encoded %d as response\n", dev_count);
 
     return 0;
 }
@@ -106,6 +120,23 @@ uint32_t backend_device_get_buffer_type(apir_encoder * enc, apir_decoder * dec, 
     }
 
     ggml_backend_buffer_type_t bufft = dev->iface.get_buffer_type(dev);
+
+    // Backend validation: Check buffer type handle before encoding
+    printf("[BACKEND] ====> backend_device_get_buffer_type: Raw buffer type handle = %p\n",
+           (void*)bufft);
+
+    if (bufft == NULL) {
+        printf("[BACKEND] ERROR: Device returned NULL buffer type!\n");
+        return 1;
+    }
+
+    if ((uintptr_t)bufft < 0x10000) {
+        printf("[BACKEND] ERROR: Device returned invalid buffer type handle %p - too small for pointer\n", (void*)bufft);
+        printf("[BACKEND] ERROR: This indicates a backend logic error, not data corruption\n");
+        return 1;
+    }
+
+    printf("[BACKEND] Buffer type handle validation passed - encoding %p\n", (void*)bufft);
     apir_encode_ggml_buffer_type(enc, bufft);
 
     return 0;

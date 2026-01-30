@@ -158,6 +158,9 @@ uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
         .iface = virgl_cbs,
     };
 
+    // Debug: Log which command is being dispatched
+    printf("[BACKEND] apir_backend_dispatcher: cmd_type=%u\n", cmd_type);
+
     if (cmd_type >= APIR_BACKEND_DISPATCH_TABLE_COUNT) {
         GGML_LOG_ERROR("Received an invalid dispatch index (%d >= %d)\n", cmd_type, APIR_BACKEND_DISPATCH_TABLE_COUNT);
         return APIR_BACKEND_FORWARD_INDEX_INVALID;

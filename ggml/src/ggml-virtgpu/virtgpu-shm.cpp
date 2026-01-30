@@ -3,6 +3,7 @@
 #include "virtgpu.h"
 
 #include <assert.h>
+#include <stdio.h>
 
 static uint32_t virtgpu_ioctl_resource_create_blob(virtgpu *  gpu,
                                                    uint32_t   blob_mem,
@@ -85,7 +86,7 @@ int virtgpu_shmem_create(virtgpu * gpu, size_t size, virtgpu_shmem * shmem) {
     void * ptr = virtgpu_ioctl_map(gpu, gem_handle, size);
     if (!ptr) {
         virtgpu_ioctl_gem_close(gpu, gem_handle);
-        GGML_LOG_ERROR("virtgpu_ioctl_map FAILED\n");
+        fprintf(stderr, "virtgpu_ioctl_map FAILED\n");
         exit(1);
         return 1;
     }

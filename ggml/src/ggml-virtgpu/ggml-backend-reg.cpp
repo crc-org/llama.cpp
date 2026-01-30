@@ -3,6 +3,10 @@
 
 #include <iostream>
 #include <mutex>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 void ggml_virtgpu_cleanup(virtgpu *gpu);
 
@@ -66,11 +70,23 @@ static virtgpu * apir_initialize() {
 static int ggml_backend_remoting_get_device_count() {
     virtgpu * gpu = apir_initialize();
     if (!gpu) {
-        GGML_LOG_WARN("apir_initialize failed\n");
+        fprintf(stderr, "apir_initialize failed\n");
         return 0;
     }
 
-    return gpu->cached_device_info.device_count;
+    int device_count = gpu->cached_device_info.device_count;
+    printf("[FRONTEND] ggml_backend_remoting_get_device_count: cached count = %d\n", device_count);
+
+    // INSTRUMENTATION: Exit if more than 2 devices found
+    if (device_count > 2) {
+        printf("[FRONTEND] FATAL: Cached device count is %d - this is abnormal!\n", device_count);
+        printf("[FRONTEND] FATAL: This cached value comes from a previous apir_device_get_count call.\n");
+        printf("[FRONTEND] FATAL: The abnormal device count (%d) matches corrupted buffer type handle.\n", device_count);
+        printf("[FRONTEND] FATAL: Terminating to prevent registration with corrupt data.\n");
+        exit(1);
+    }
+
+    return device_count;
 }
 
 static size_t ggml_backend_remoting_reg_get_device_count(ggml_backend_reg_t reg) {
@@ -88,13 +104,13 @@ ggml_backend_dev_t ggml_backend_remoting_get_device(size_t device) {
 
 static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
     if (devices.size() > 0) {
-        GGML_LOG_INFO("%s: already initialized\n", __func__);
+        printf("%s: already initialized\n", __func__);
         return;
     }
 
     virtgpu * gpu = apir_initialize();
     if (!gpu) {
-        GGML_LOG_ERROR("apir_initialize failed\n");
+        fprintf(stderr, "apir_initialize failed\n");
         return;
     }
 
@@ -113,8 +129,8 @@ static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
                 char                                   desc[256] = "API Remoting device";
 
                 ctx->device      = i;
-                ctx->name        = GGML_REMOTING_FRONTEND_NAME + std::to_string(i);
-                ctx->description = desc;
+                ctx->name        = std::string(GGML_REMOTING_FRONTEND_NAME) + std::to_string(i);
+                ctx->description = std::string(desc);
                 ctx->gpu         = gpu;
 
                 ggml_backend_dev_t dev = new ggml_backend_device{
@@ -151,7 +167,7 @@ static const ggml_backend_reg_i ggml_backend_remoting_reg_i = {
 ggml_backend_reg_t ggml_backend_virtgpu_reg() {
     virtgpu * gpu = apir_initialize();
     if (!gpu) {
-        GGML_LOG_ERROR("virtgpu_apir_initialize failed\n");
+        fprintf(stderr, "virtgpu_apir_initialize failed\n");
         return NULL;
     }
 
@@ -169,7 +185,7 @@ ggml_backend_reg_t ggml_backend_virtgpu_reg() {
 
     ggml_backend_remoting_reg_init_devices(&reg);
 
-    GGML_LOG_INFO("%s: initialized\n", __func__);
+    printf("%s: initialized\n", __func__);
 
     return &reg;
 }

@@ -3,6 +3,10 @@
 #include "virtgpu-shm.h"
 #endif
 
+#include <sys/mman.h>  // For madvise and MADV_* constants
+#include <unistd.h>    // For POSIX functions
+#include <cstdlib>     // For exit()
+
 int apir_device_get_count(virtgpu * gpu) {
 
     static int32_t dev_count = -1;
@@ -24,6 +28,17 @@ int apir_device_get_count(virtgpu * gpu) {
     apir_decode_int32_t(decoder, &dev_count);
 
     remote_call_finish(gpu, encoder, decoder);
+
+    printf("[FRONTEND] apir_device_get_count: Received %d devices from backend\n", dev_count);
+
+    // INSTRUMENTATION: Exit if more than 2 devices found
+    if (dev_count > 2) {
+        printf("[FRONTEND] FATAL: Backend reported %d devices - this is abnormal!\n", dev_count);
+        printf("[FRONTEND] FATAL: Expected 1-2 devices maximum.\n");
+        printf("[FRONTEND] FATAL: This device count (%d) matches the corrupted buffer type handle.\n", dev_count);
+        printf("[FRONTEND] FATAL: Terminating to prevent further corruption.\n");
+        exit(1);
+    }
 
     return dev_count;
 }
@@ -149,13 +164,14 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
     apir_buffer_type_host_handle_t buft_handle = (apir_buffer_type_host_handle_t)buft;
 
     // Validate the decoded buffer type handle
-    if (buft_handle == 0 || buft_handle < 0x10000) {
-        printf("[GUEST] ERROR: apir_device_get_buffer_type received invalid buffer type handle: %lu (0x%lx)\n",
-               (unsigned long)buft_handle, (unsigned long)buft_handle);
-        printf("[GUEST] ERROR: This indicates the Windows service returned garbage data\n");
+    if (buft_handle == 0) {
+        printf("[GUEST] ERROR: apir_device_get_buffer_type received null buffer type handle\n");
         remote_call_finish(gpu, encoder, decoder);
         return 0; // Return 0 to indicate failure
     }
+
+    printf("[GUEST] Successfully received buffer type handle: %lu (0x%lx)\n",
+           (unsigned long)buft_handle, (unsigned long)buft_handle);
 
     remote_call_finish(gpu, encoder, decoder);
 
@@ -175,52 +191,21 @@ void apir_device_get_props(virtgpu * gpu,
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    printf("[GUEST] About to decode uint32_t values from response:\n");
-    printf("[GUEST] Decoder state: cur=%p, end=%p, remaining_bytes=%ld\n",
-           decoder->cur, decoder->end, decoder->end - decoder->cur);
-
-    // Hex dump of received data (same 20 bytes as Windows service shows)
-    printf("[GUEST] Received buffer content (first 20 bytes):\n");
-    printf("[GUEST] Hex dump: ");
-    for (int i = 0; i < 20 && decoder->cur + i < decoder->end; i++) {
-        printf("%02x ", (unsigned char)decoder->cur[i]);
-        if ((i + 1) % 16 == 0) printf("\n[GUEST]           ");
-    }
-    printf("\n");
-
-    uint32_t recv_async, recv_host_buffer, recv_buffer_from_host_ptr, recv_events;
+    uint32_t recv_async;
+    uint32_t recv_host_buffer;
+    uint32_t recv_buffer_from_host_ptr;
+    uint32_t recv_events;
 
     apir_decode_uint32_t(decoder, &recv_async);
-
     apir_decode_uint32_t(decoder, &recv_host_buffer);
-
     apir_decode_uint32_t(decoder, &recv_buffer_from_host_ptr);
-
     apir_decode_uint32_t(decoder, &recv_events);
-
-    printf("[GUEST] Expected values:\n");
-
-    printf("[GUEST]   async should be:                0xAAAA1111 --> 0x%x\n", recv_async);
-    printf("[GUEST]   host_buffer should be:          0xBBBB2222 --> 0x%x\n", recv_host_buffer);
-    printf("[GUEST]   buffer_from_host_ptr should be: 0xCCCC3333 --> 0x%x\n", recv_buffer_from_host_ptr);
-    printf("[GUEST]   events should be:               0xDDDD4444 --> 0x%x\n", recv_events);
 
     // Convert back to boolean values for the function signature
     *async = (recv_async != 0);
     *host_buffer = (recv_host_buffer != 0);
     *buffer_from_host_ptr = (recv_buffer_from_host_ptr != 0);
     *events = (recv_events != 0);
-
-    if (recv_buffer_from_host_ptr != 0xCCCC3333) {
-        printf("[GUEST] ERROR: buffer_from_host_ptr mismatch! Expected 0xCCCC3333, got 0x%08X\n", recv_buffer_from_host_ptr);
-        printf("thks bye :/\n");
-        _exit(0);
-    }
-
-    printf("[GUEST] SUCCESS: All hex values match expected patterns!\n");
-    _exit(0);
-
-    *buffer_from_host_ptr = true;
     remote_call_finish(gpu, encoder, decoder);
 }
 

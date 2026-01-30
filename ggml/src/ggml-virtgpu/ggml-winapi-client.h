@@ -67,6 +67,11 @@ void ggml_winapi_free_shared_buffer(ggml_winapi_shared_buffer_t *buffer);
 int ggml_winapi_register_buffer(ggml_winapi_handle_t handle,
                                const ggml_winapi_shared_buffer_t* buffer);
 
+/* Set persistent APIR buffers (called during backend initialization) */
+int ggml_winapi_set_apir_buffers(ggml_winapi_handle_t handle,
+                                const ggml_winapi_shared_buffer_t* reply_buffer,
+                                const ggml_winapi_shared_buffer_t* command_buffer);
+
 /* Send APIR command to Windows host */
 int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                                  const void* apir_data,
