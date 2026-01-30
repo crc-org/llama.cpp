@@ -14,19 +14,11 @@ uint32_t backend_buffer_type_get_name(apir_encoder * enc, apir_decoder * dec, vi
 
     ggml_backend_buffer_type_t buft = apir_decode_ggml_buffer_type(dec);
 
-    // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] backend_buffer_type_get_name: Received buffer type handle = %p\n",
-           (void*)buft);
-
     if (buft == NULL || (uintptr_t)buft < 0x10000) {
-        printf("[ERROR] backend_buffer_type_get_name: Invalid buffer type handle %p\n", (void*)buft);
         return 1;
     }
 
-    printf("[BACKEND] Buffer type handle validation passed for get_name\n");
-
     const char * string = buft->iface.get_name(buft);
-    printf("[BACKEND] get_name returned: '%s'\n", string ? string : "NULL");
 
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);
@@ -44,26 +36,13 @@ uint32_t backend_buffer_type_get_alignment(apir_encoder * enc, apir_decoder * de
     printf("[BACKEND] backend_buffer_type_get_alignment: Received buffer type handle = %p\n",
            (void*)buft);
 
-    if (!buft) {
-        printf("[ERROR] backend_buffer_type_get_alignment: buft is NULL\n");
-        return 1; // Return error code
-    }
-
-    if ((uintptr_t)buft < 0x10000) {
-        printf("[ERROR] backend_buffer_type_get_alignment: Invalid buffer type handle %p - too small for pointer\n",
-               (void*)buft);
-        printf("[ERROR] This indicates corrupted data or backend logic error\n");
+    if (!buft || (uintptr_t)buft < 0x10000) {
         return 1;
     }
-
-    printf("[BACKEND] Buffer type handle validation passed for get_alignment\n");
 
     size_t value = 0;
     if (buft->iface.get_alignment) {
         value = buft->iface.get_alignment(buft);
-        printf("[BACKEND] get_alignment returned: %zu\n", value);
-    } else {
-        printf("[BACKEND] No get_alignment interface, using default 0\n");
     }
 
     apir_encode_size_t(enc, &value);

@@ -374,7 +374,6 @@ static enum ggml_backend_dev_type ggml_backend_cpu_device_get_type(ggml_backend_
 }
 
 static void ggml_backend_cpu_device_get_props(ggml_backend_dev_t dev, struct ggml_backend_dev_props * props) {
-    printf("[CPU_BACKEND] ggml_backend_cpu_device_get_props called\n");
 
     props->name        = ggml_backend_cpu_device_get_name(dev);
     props->description = ggml_backend_cpu_device_get_description(dev);
@@ -386,16 +385,6 @@ static void ggml_backend_cpu_device_get_props(ggml_backend_dev_t dev, struct ggm
         /* .buffer_from_host_ptr  = */ true,
         /* .events                = */ false,
     };
-
-    printf("[CPU_BACKEND] Setting props->caps.buffer_from_host_ptr = %s\n",
-           props->caps.buffer_from_host_ptr ? "true" : "false");
-    printf("[CPU_BACKEND] Setting props->caps.host_buffer = %s\n",
-           props->caps.host_buffer ? "true" : "false");
-    printf("[CPU_BACKEND] Setting props->caps.async = %s\n",
-           props->caps.async ? "true" : "false");
-    printf("[CPU_BACKEND] Setting props->caps.events = %s\n",
-           props->caps.events ? "true" : "false");
-    fflush(stdout);
 }
 
 static ggml_backend_t ggml_backend_cpu_device_init_backend(ggml_backend_dev_t dev, const char * params) {

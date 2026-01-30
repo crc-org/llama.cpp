@@ -22,26 +22,19 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     GGML_UNUSED(ctx);
     GGML_UNUSED(dec);
 
-    printf("[BACKEND] ====> backend_device_get_count: Called\n");
-
     if (reg == NULL) {
-        printf("[BACKEND] ERROR: backend_device_get_count: reg is NULL\n");
         return 1;
     }
 
     int32_t dev_count = reg->iface.get_device_count(reg);
-    printf("[BACKEND] ====> backend_device_get_count: Registry reports %d devices\n", dev_count);
 
     // INSTRUMENTATION: Exit if more than 2 devices found
     if (dev_count > 2) {
-        printf("[BACKEND] FATAL: Found %d devices - this is abnormal! Expected 1-2 devices maximum.\n", dev_count);
-        printf("[BACKEND] FATAL: This suggests a serious backend registry error.\n");
-        printf("[BACKEND] FATAL: Terminating to prevent corruption.\n");
+        printf("[BACKEND] FATAL: Found %d devices - abnormal! Expected 1-2 maximum. Terminating.\n", dev_count);
         exit(1);
     }
 
     apir_encode_int32_t(enc, &dev_count);
-    printf("[BACKEND] ====> backend_device_get_count: Encoded %d as response\n", dev_count);
 
     return 0;
 }
@@ -64,7 +57,7 @@ uint32_t backend_device_get_description(apir_encoder * enc, apir_decoder * dec, 
     GGML_UNUSED(dec);
 
     const char * string = dev->iface.get_description(dev);
-
+    printf("==> %s <==\n", string);
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);
     apir_encode_char_array(enc, string, string_size);
@@ -122,21 +115,15 @@ uint32_t backend_device_get_buffer_type(apir_encoder * enc, apir_decoder * dec, 
     ggml_backend_buffer_type_t bufft = dev->iface.get_buffer_type(dev);
 
     // Backend validation: Check buffer type handle before encoding
-    printf("[BACKEND] ====> backend_device_get_buffer_type: Raw buffer type handle = %p\n",
-           (void*)bufft);
-
     if (bufft == NULL) {
         printf("[BACKEND] ERROR: Device returned NULL buffer type!\n");
         return 1;
     }
 
     if ((uintptr_t)bufft < 0x10000) {
-        printf("[BACKEND] ERROR: Device returned invalid buffer type handle %p - too small for pointer\n", (void*)bufft);
-        printf("[BACKEND] ERROR: This indicates a backend logic error, not data corruption\n");
+        printf("[BACKEND] ERROR: Invalid buffer type handle %p - backend logic error\n", (void*)bufft);
         return 1;
     }
-
-    printf("[BACKEND] Buffer type handle validation passed - encoding %p\n", (void*)bufft);
     apir_encode_ggml_buffer_type(enc, bufft);
 
     return 0;
@@ -148,14 +135,6 @@ uint32_t backend_device_get_props(apir_encoder * enc, apir_decoder * dec, virgl_
 
     ggml_backend_dev_props props;
     dev->iface.get_props(dev, &props);
-
-    printf("[BACKEND_DISPATCHER] CPU backend returned:\n");
-    printf("[BACKEND_DISPATCHER]   async = %s\n", props.caps.async ? "true" : "false");
-    printf("[BACKEND_DISPATCHER]   host_buffer = %s\n", props.caps.host_buffer ? "true" : "false");
-    printf("[BACKEND_DISPATCHER]   buffer_from_host_ptr = %s\n", props.caps.buffer_from_host_ptr ? "true" : "false");
-    printf("[BACKEND_DISPATCHER]   events = %s\n", props.caps.events ? "true" : "false");
-
-    printf("[BACKEND_DISPATCHER] About to encode distinctive hex values:\n");
 
     // Send distinctive hex values instead of actual booleans
     uint32_t test_async = 0xAAAA1111;

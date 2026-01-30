@@ -29,14 +29,9 @@ int apir_device_get_count(virtgpu * gpu) {
 
     remote_call_finish(gpu, encoder, decoder);
 
-    printf("[FRONTEND] apir_device_get_count: Received %d devices from backend\n", dev_count);
-
     // INSTRUMENTATION: Exit if more than 2 devices found
     if (dev_count > 2) {
-        printf("[FRONTEND] FATAL: Backend reported %d devices - this is abnormal!\n", dev_count);
-        printf("[FRONTEND] FATAL: Expected 1-2 devices maximum.\n");
-        printf("[FRONTEND] FATAL: This device count (%d) matches the corrupted buffer type handle.\n", dev_count);
-        printf("[FRONTEND] FATAL: Terminating to prevent further corruption.\n");
+        printf("[FRONTEND] FATAL: Backend reported %d devices - abnormal! Expected 1-2 maximum. Terminating.\n", dev_count);
         exit(1);
     }
 
@@ -169,9 +164,6 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
         remote_call_finish(gpu, encoder, decoder);
         return 0; // Return 0 to indicate failure
     }
-
-    printf("[GUEST] Successfully received buffer type handle: %lu (0x%lx)\n",
-           (unsigned long)buft_handle, (unsigned long)buft_handle);
 
     remote_call_finish(gpu, encoder, decoder);
 

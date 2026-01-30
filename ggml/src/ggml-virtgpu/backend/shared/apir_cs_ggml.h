@@ -68,15 +68,7 @@ static inline const ggml_tensor * apir_decode_ggml_tensor(apir_decoder * dec) {
 static inline void apir_encode_ggml_buffer_type(apir_encoder * enc, ggml_backend_buffer_type_t buft) {
     apir_buffer_type_host_handle_t handle = ggml_buffer_type_to_apir_handle(buft);
 
-    // Fool check: Verify what we're about to encode
-    printf("[BACKEND] apir_encode_ggml_buffer_type: encoding handle %p from buft %p\n",
-           (void*)(uintptr_t)handle, (void*)buft);
-
-    printf("[BACKEND] About to write %zu bytes to encoder\n", sizeof(handle));
-
     apir_encoder_write(enc, sizeof(handle), &handle, sizeof(handle));
-
-    printf("[BACKEND] Successfully wrote buffer type handle to encoder\n");
 }
 
 static inline ggml_backend_buffer_type_t apir_decode_ggml_buffer_type(apir_decoder * dec) {

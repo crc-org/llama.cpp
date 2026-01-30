@@ -1822,9 +1822,7 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
 
     // Use SEH (Structured Exception Handling) to catch crashes during APIR init
     __try {
-        printf("[WINDOWS_SERVICE] Calling apir_backend_initialize(1, callbacks)...\n");
         result = apir_backend_initialize(1, &g_windows_callbacks);
-        printf("[WINDOWS_SERVICE] apir_backend_initialize returned: %d\n", result);
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
         printf("[ERROR] APIR backend initialization crashed (access violation)\n");
@@ -1836,7 +1834,6 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
     // Restore the original exception handler
     SetUnhandledExceptionFilter(original_handler);
 
-    printf("[WINDOWS_SERVICE] SafeAPIRBackendInit complete: result=%d, crashed=%s\n", result, *crashed_out ? "true" : "false");
     return result;
 }
 
@@ -1845,19 +1842,13 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
  */
 DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response)
 {
-    printf("[DEBUG] HandleAPIRAPI: Function entry\n");
-
     UINT32 cmd_type = request.get("apir_cmd_type", 0).asUInt();
     UINT64 apir_data_size = request.get("apir_data_size", 0).asUInt64();
     UINT32 buffer_id = request.get("buffer_id", 0).asUInt();
     UINT32 response_buffer_id = request.get("response_buffer_id", buffer_id).asUInt(); // Default to input buffer if not specified
 
-    printf("[DEBUG] HandleAPIRAPI: cmd_type=%u, apir_data_size=%I64u, buffer_id=%u, response_buffer_id=%u\n",
-           cmd_type, apir_data_size, buffer_id, response_buffer_id);
-
     // Get session ID from client socket
     uint32_t session_id = get_client_session_id(client_socket);
-    printf("[DEBUG] HandleAPIRAPI: session_id=%u\n", session_id);
 
     // Initialize APIR backend if not already done
     if (!g_ctx.apir_backend_initialized) {
@@ -1898,7 +1889,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
 
     // Get the already-mapped buffer from registration (no need to re-map!)
-    printf("[DEBUG] HandleAPIRAPI: Looking up buffer mapping for session %u, buffer %u\n", session_id, buffer_id);
 
     auto session_it = g_client_sessions.find(session_id);
     if (session_it == g_client_sessions.end()) {
@@ -1907,13 +1897,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     }
 
     auto& session = session_it->second;
-
-    // Show what buffer IDs actually exist
-    printf("[DEBUG] HandleAPIRAPI: Session %u has %zu buffers: ", session_id, session.buffers.size());
-    for (const auto& pair : session.buffers) {
-        printf("%u ", pair.first);
-    }
-    printf("\n");
 
     // Find input buffer (for APIR command data)
     auto input_buffer_it = session.buffers.find(buffer_id);
@@ -1925,8 +1908,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     BufferMapping& input_buffer_mapping = input_buffer_it->second;
     void* input_mapped_memory = input_buffer_mapping.mapped_memory;
     size_t input_buffer_size = input_buffer_mapping.size;
-
-    printf("[DEBUG] HandleAPIRAPI: Found input buffer mapping: %p (size=%zu)\n", input_mapped_memory, input_buffer_size);
 
     if (apir_data_size > input_buffer_size) {
         printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
@@ -1943,8 +1924,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     BufferMapping& response_buffer_mapping = response_buffer_it->second;
     void* response_mapped_memory = response_buffer_mapping.mapped_memory;
     size_t response_buffer_size = response_buffer_mapping.size;
-
-    printf("[DEBUG] HandleAPIRAPI: Found response buffer mapping: %p (size=%zu)\n", response_mapped_memory, response_buffer_size);
 
     char* enc_cur_after = NULL;
 
@@ -1982,86 +1961,16 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         &enc_cur_after                     // Output position after encoding
     );
 
-    printf("[DEBUG] HandleAPIRAPI: Dispatcher returned %u\n", dispatch_result);
-
     // Prepend APIR return code to response (Windows-specific APIR protocol layer)
     size_t backend_data_size = enc_cur_after - (char*)response_mapped_memory;
     memmove((char*)response_mapped_memory + sizeof(uint32_t), response_mapped_memory, backend_data_size);
 
-    // Debug: Show what the backend dispatcher wrote to response buffer
-    printf("[WINDOWS_SERVICE] Backend wrote %zu bytes to response buffer (before prepending return code)\n", backend_data_size);
-    printf("[WINDOWS_SERVICE] Backend data (first 16 bytes): ");
-    unsigned char* backend_bytes = (unsigned char*)((char*)response_mapped_memory + sizeof(uint32_t));
-    for (size_t i = 0; i < 16 && i < backend_data_size; i++) {
-        printf("%02x ", backend_bytes[i]);
-    }
-    printf("\n");
     *(uint32_t*)response_mapped_memory = dispatch_result;
     enc_cur_after += sizeof(uint32_t);
 
-    printf("[WINDOWS_SERVICE] Added APIR return code ({%d}) to response, total size: %zu\n",
-           dispatch_result,
-           enc_cur_after - (char*)response_mapped_memory);
-
-    // Debug: Show final complete response after return code added
-    size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
-    printf("[WINDOWS_SERVICE] Final complete response (first 16 bytes): ");
-    unsigned char* complete_response = (unsigned char*)response_mapped_memory;
-    for (size_t i = 0; i < 16 && i < total_response_size; i++) {
-        printf("%02x ", complete_response[i]);
-    }
-    printf("\n");
-
     // Avoid Json::Value objects completely - return success code for manual JSON handling
-
-    if (dispatch_result == 0) {
-        // Success (APIR_FORWARD_SUCCESS = 0) - data already written directly to shared memory
-        size_t response_data_size = enc_cur_after - (char*)response_mapped_memory;
-
-        // Log shared memory contents
-        printf("[WINDOWS_SERVICE] Shared memory content (size=%zu):\n", response_data_size);
-        if (response_data_size > 0) {
-            printf("[WINDOWS_SERVICE] Hex dump: ");
-            for (size_t i = 0; i < response_data_size && i < 64; i++) {
-                printf("%02x ", (unsigned char)((char*)response_mapped_memory)[i]);
-                if ((i + 1) % 16 == 0) printf("\n[WINDOWS_SERVICE]            ");
-            }
-            printf("\n");
-        }
-
-        if (response_data_size > 0) {
-            printf("[WINDOWS_SERVICE] Response written directly to shared memory (%zu bytes)\n",
-                   response_data_size);
-        } else {
-            printf("[WINDOWS_SERVICE] No response data to write (response_data_size=0)\n");
-        }
-    } else {
-        // Error handling for dispatch failures
-        printf("[ERROR] APIR command failed with code: %u\n", dispatch_result);
-    }
     // No cleanup needed - reusing existing buffer mapping from registration
 
-    printf("[DEBUG] HandleAPIRAPI: About to show final buffer content\n");
-
-    // Final instrumentation: Show exactly what the guest will read
-    printf("[WINDOWS_SERVICE] === FINAL BUFFER CONTENT BEFORE GUEST READS ===\n");
-    printf("[WINDOWS_SERVICE] Buffer address: %p\n", response_mapped_memory);
-    printf("[WINDOWS_SERVICE] Buffer size: %zu bytes\n", response_buffer_size);
-
-    size_t display_size = (response_buffer_size > 64) ? 64 : response_buffer_size;
-    printf("[WINDOWS_SERVICE] Content (first %zu bytes):\n", display_size);
-    printf("[WINDOWS_SERVICE] ");
-
-    for (size_t i = 0; i < display_size; i++) {
-        printf("%02x ", (unsigned char)((char*)response_mapped_memory)[i]);
-        if ((i + 1) % 16 == 0) {
-            printf("\n[WINDOWS_SERVICE] ");
-        }
-    }
-    printf("\n");
-    printf("[WINDOWS_SERVICE] === END BUFFER CONTENT ===\n");
-
-    fflush(stdout);
     // Return special code to indicate success but avoid Json::Value serialization
     return 999;  // Custom success code for manual JSON handling
 }

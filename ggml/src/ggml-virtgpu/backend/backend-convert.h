@@ -14,19 +14,11 @@ static inline apir_buffer_type_host_handle_t ggml_buffer_type_to_apir_handle(ggm
     // in the backend, the buffer handle is the buffer pointer
     apir_buffer_type_host_handle_t handle = (apir_buffer_type_host_handle_t) buft;
 
-    // Fool check: Validate the conversion
-    printf("[BACKEND] ggml_buffer_type_to_apir_handle: input=%p -> output=%p\n",
-           (void*)buft, (void*)(uintptr_t)handle);
-
+    // Validate the conversion
     if (handle == 0) {
         printf("[BACKEND] ERROR: Buffer type conversion resulted in NULL handle!\n");
     } else if (handle < 0x10000) {
-        printf("[BACKEND] ERROR: Buffer type conversion resulted in invalid small handle %p!\n",
-               (void*)(uintptr_t)handle);
-        printf("[BACKEND] ERROR: Input buffer type was %p - this suggests backend logic error\n", (void*)buft);
-    } else {
-        printf("[BACKEND] Buffer type conversion OK: %p -> %p\n",
-               (void*)buft, (void*)(uintptr_t)handle);
+        printf("[BACKEND] ERROR: Invalid small handle - backend logic error\n");
     }
 
     return handle;

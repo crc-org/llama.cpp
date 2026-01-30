@@ -75,14 +75,10 @@ static int ggml_backend_remoting_get_device_count() {
     }
 
     int device_count = gpu->cached_device_info.device_count;
-    printf("[FRONTEND] ggml_backend_remoting_get_device_count: cached count = %d\n", device_count);
 
     // INSTRUMENTATION: Exit if more than 2 devices found
     if (device_count > 2) {
-        printf("[FRONTEND] FATAL: Cached device count is %d - this is abnormal!\n", device_count);
-        printf("[FRONTEND] FATAL: This cached value comes from a previous apir_device_get_count call.\n");
-        printf("[FRONTEND] FATAL: The abnormal device count (%d) matches corrupted buffer type handle.\n", device_count);
-        printf("[FRONTEND] FATAL: Terminating to prevent registration with corrupt data.\n");
+        printf("[FRONTEND] FATAL: Cached device count %d abnormal! Terminating.\n", device_count);
         exit(1);
     }
 
