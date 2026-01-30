@@ -1937,6 +1937,12 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         &enc_cur_after                     // Output position after encoding
     );
 
+    // Prepend APIR return code to response (Windows-specific APIR protocol layer)
+    size_t backend_data_size = enc_cur_after - response_buffer;
+    memmove(response_buffer + sizeof(uint32_t), response_buffer, backend_data_size);
+    *(uint32_t*)response_buffer = 0;  // APIR_FORWARD_SUCCESS
+    enc_cur_after += sizeof(uint32_t);
+
     // Avoid Json::Value objects completely - return success code for manual JSON handling
 
     if (dispatch_result == 0) {
