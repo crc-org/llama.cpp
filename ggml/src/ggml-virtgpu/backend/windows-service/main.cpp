@@ -1912,26 +1912,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     // Force Windows cache coherency - ensure we read fresh data from WSL2 guest
     FlushViewOfFile(input_mapped_memory, input_buffer_size);
 
-    // Consistency check: Verify command ID from frontend
-    uint32_t* cmd_consistency_ptr = (uint32_t*)input_mapped_memory;
-    uint32_t magic_marker = cmd_consistency_ptr[0];
-    uint32_t frontend_cmd_id = cmd_consistency_ptr[1];
-    printf("[WINDOWS_SERVICE] Consistency check: magic=0x%x, frontend_cmd_id=%u, json_cmd_type=%u\n",
-           magic_marker, frontend_cmd_id, cmd_type);
-
-    if (magic_marker != 0xDEADBEEF) {
-        printf("[ERROR] Invalid magic marker in command buffer! Expected 0xDEADBEEF, got 0x%x\n", magic_marker);
-        return ERROR_INVALID_PARAMETER;
-    }
-
-    if (frontend_cmd_id != cmd_type) {
-        printf("[ERROR] Command ID mismatch! Frontend buffer=%u, JSON cmd_type=%u - CACHE COHERENCY ISSUE!\n",
-               frontend_cmd_id, cmd_type);
-        return ERROR_INVALID_PARAMETER;
-    }
-
-    printf("[WINDOWS_SERVICE] Command ID consistency check PASSED\n");
-
     if (apir_data_size > input_buffer_size) {
         printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
         return ERROR_INVALID_PARAMETER;
@@ -1990,13 +1970,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     *(uint32_t*)response_mapped_memory = dispatch_result;
     enc_cur_after += sizeof(uint32_t);
-
-    // Consistency check: Write command ID to response buffer for frontend validation
-    uint32_t* response_consistency_ptr = (uint32_t*)((char*)response_mapped_memory + sizeof(uint32_t));
-    response_consistency_ptr[0] = 0xCAFEBABE; /* Response magic marker */
-    response_consistency_ptr[1] = frontend_cmd_id; /* Echo back the command ID */
-    enc_cur_after += 2 * sizeof(uint32_t);
-    printf("[WINDOWS_SERVICE] Wrote response consistency: magic=0xCAFEBABE, cmd_id=%u\n", frontend_cmd_id);
 
     // Force Windows cache coherency - ensure WSL2 guest sees fresh response data
     size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
