@@ -56,6 +56,12 @@ static inline const char * frontend_command_name(int cmd_type) {
             fflush(stdout);                                                                              \
             exit(1);                                                                                     \
         }                                                                                                  \
+        /* Consistency check: Write command ID at start of command buffer */                             \
+        uint32_t* cmd_consistency_ptr = (uint32_t*)gpu_dev_name->command_shmem.mmap_ptr;                  \
+        cmd_consistency_ptr[0] = 0xDEADBEEF; /* Magic marker */                                          \
+        cmd_consistency_ptr[1] = (uint32_t)forward_flag; /* Command ID */                                \
+        printf("[FRONTEND] Wrote consistency check: magic=0x%x, cmd_id=%u\n", cmd_consistency_ptr[0], cmd_consistency_ptr[1]); \
+        fflush(stdout);                                                                                    \
     } while (0)
 
 #define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name, ret_name)                                           \
@@ -64,6 +70,17 @@ static inline const char * frontend_command_name(int cmd_type) {
         printf("[FRONTEND] madvise reply buffer AFTER remote_call: ptr=%p size=%zu\n", gpu_dev_name->reply_shmem.mmap_ptr, gpu_dev_name->reply_shmem.mmap_size); \
         fflush(stdout); \
         madvise(gpu_dev_name->reply_shmem.mmap_ptr, gpu_dev_name->reply_shmem.mmap_size, MADV_DONTNEED);       \
+        /* Response consistency check: Verify response magic from backend */ \
+        uint32_t* response_consistency_ptr = (uint32_t*)((char*)gpu_dev_name->reply_shmem.mmap_ptr + sizeof(uint32_t)); \
+        uint32_t response_magic = response_consistency_ptr[0]; \
+        uint32_t response_cmd_id = response_consistency_ptr[1]; \
+        printf("[FRONTEND] Response consistency: magic=0x%x, cmd_id=%u\n", response_magic, response_cmd_id); \
+        if (response_magic != 0xCAFEBABE) { \
+            printf("[FRONTEND] ERROR: Invalid response magic! Expected 0xCAFEBABE, got 0x%x - CACHE COHERENCY ISSUE!\n", response_magic); \
+            exit(1); \
+        } \
+        printf("[FRONTEND] Response consistency check PASSED\n"); \
+        fflush(stdout); \
         if (!decoder_name) {                                                                                      \
             printf("FATAL: %s: failed to kick the remote call\n", __func__);                                   \
             fflush(stdout);                                                                                      \
