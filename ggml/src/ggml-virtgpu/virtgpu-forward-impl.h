@@ -12,6 +12,8 @@
 
 #include "../ggml-backend-impl.h"
 
+#include <sys/mman.h>  // For madvise and MADV_DONTNEED
+
 /* Function name mapping for client-side logging */
 static inline const char * frontend_command_name(int cmd_type) {
     switch (cmd_type) {
@@ -59,6 +61,9 @@ static inline const char * frontend_command_name(int cmd_type) {
 #define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name, ret_name)                                           \
     do {                                                                                                          \
         ret_name = (ApirForwardReturnCode) remote_call(gpu_dev_name, encoder_name, &decoder_name, 0, NULL);       \
+        printf("[FRONTEND] madvise reply buffer AFTER remote_call: ptr=%p size=%zu\n", gpu_dev_name->reply_shmem.mmap_ptr, gpu_dev_name->reply_shmem.mmap_size); \
+        fflush(stdout); \
+        madvise(gpu_dev_name->reply_shmem.mmap_ptr, gpu_dev_name->reply_shmem.mmap_size, MADV_DONTNEED);       \
         if (!decoder_name) {                                                                                      \
             printf("FATAL: %s: failed to kick the remote call\n", __func__);                                   \
             fflush(stdout);                                                                                      \
