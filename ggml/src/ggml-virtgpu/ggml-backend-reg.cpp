@@ -49,6 +49,7 @@ static virtgpu * apir_initialize() {
                               &gpu->cached_device_info.memory_free,
                               &gpu->cached_device_info.memory_total);
 
+        printf("[VIRTGPU] Populating the cache values\n");
         apir_buffer_type_host_handle_t buft_host_handle = apir_device_get_buffer_type(gpu);
         if (buft_host_handle == 0) {
             GGML_ABORT("failed to get valid buffer type from device - Windows service returned garbage data");
@@ -60,7 +61,7 @@ static virtgpu * apir_initialize() {
         }
         gpu->cached_buffer_type.alignment               = apir_buffer_type_get_alignment(gpu, buft_host_handle);
         gpu->cached_buffer_type.max_size                = apir_buffer_type_get_max_size(gpu, buft_host_handle);
-
+        printf("[VIRTGPU] Populating the cache values ==> Done\n");
         initialized = true;
     }
 
@@ -75,12 +76,6 @@ static int ggml_backend_remoting_get_device_count() {
     }
 
     int device_count = gpu->cached_device_info.device_count;
-
-    // INSTRUMENTATION: Exit if more than 2 devices found
-    if (device_count > 2) {
-        printf("[FRONTEND] FATAL: Cached device count %d abnormal! Terminating.\n", device_count);
-        exit(1);
-    }
 
     return device_count;
 }

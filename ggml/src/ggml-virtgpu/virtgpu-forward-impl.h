@@ -45,6 +45,9 @@ static inline const char * frontend_command_name(int cmd_type) {
 #define REMOTE_CALL_PREPARE(gpu_dev_name, encoder_name, apir_command_type__)                               \
     do {                                                                                                   \
         int32_t forward_flag = (int32_t) apir_command_type__;                                              \
+        const char * method_name = frontend_command_name(forward_flag);                                    \
+        printf("[FRONTEND] Calling method: %s (cmd_type=%d)\n", method_name, forward_flag);             \
+        fflush(stdout);                                                                                    \
         encoder_name         = remote_call_prepare(gpu_dev_name, APIR_COMMAND_TYPE_FORWARD, forward_flag); \
         if (!encoder_name) {                                                                               \
             printf("FATAL: %s: failed to prepare the remote call encoder\n", __func__);                 \
