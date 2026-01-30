@@ -364,6 +364,29 @@ int ggml_winapi_set_apir_buffers(ggml_winapi_handle_t handle,
 
     ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
 
+    printf("[LINUX_BUFFER_REGISTRATION] Registering reply buffer: file=%s, id=%u, size=%zu\n",
+           reply_buffer->file_path, reply_buffer->buffer_id, reply_buffer->size);
+
+    /* Register reply buffer with Windows service - CRITICAL FOR CACHE COHERENCY! */
+    int reply_ret = ggml_winapi_register_buffer(handle, reply_buffer);
+    if (reply_ret != GGML_WINAPI_OK) {
+        fprintf(stderr, "ggml-winapi: Failed to register reply buffer with Windows service: %d\n", reply_ret);
+        return reply_ret;
+    }
+
+    printf("[LINUX_BUFFER_REGISTRATION] Registering command buffer: file=%s, id=%u, size=%zu\n",
+           command_buffer->file_path, command_buffer->buffer_id, command_buffer->size);
+
+    /* Register command buffer with Windows service - CRITICAL FOR CACHE COHERENCY! */
+    int command_ret = ggml_winapi_register_buffer(handle, command_buffer);
+    if (command_ret != GGML_WINAPI_OK) {
+        fprintf(stderr, "ggml-winapi: Failed to register command buffer with Windows service: %d\n", command_ret);
+        return command_ret;
+    }
+
+    printf("[LINUX_BUFFER_REGISTRATION] Both buffers registered successfully with Windows service\n");
+    fflush(stdout);
+
     /* Store buffer information for use by send_apir_command */
     ctx->reply_buffer = *reply_buffer;
     ctx->command_buffer = *command_buffer;
