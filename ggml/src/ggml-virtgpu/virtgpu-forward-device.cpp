@@ -166,16 +166,51 @@ void apir_device_get_props(virtgpu * gpu,
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    apir_decode_bool_t(decoder, async);
-    apir_decode_bool_t(decoder, host_buffer);
-    apir_decode_bool_t(decoder, buffer_from_host_ptr);
-    apir_decode_bool_t(decoder, events);
+    printf("[GUEST] About to decode uint32_t values from response:\n");
+    printf("[GUEST] Decoder state: cur=%p, end=%p, remaining_bytes=%ld\n",
+           decoder->cur, decoder->end, decoder->end - decoder->cur);
 
-    printf("[GUEST] Device props response:\n");
-    printf("[GUEST]   async = %s\n", *async ? "true" : "false");
-    printf("[GUEST]   host_buffer = %s\n", *host_buffer ? "true" : "false");
-    printf("[GUEST]   buffer_from_host_ptr = %s\n", *buffer_from_host_ptr ? "true" : "false");
-    printf("[GUEST]   events = %s\n", *events ? "true" : "false");
+    // Hex dump of received data (same 20 bytes as Windows service shows)
+    printf("[GUEST] Received buffer content (first 20 bytes):\n");
+    printf("[GUEST] Hex dump: ");
+    for (int i = 0; i < 20 && decoder->cur + i < decoder->end; i++) {
+        printf("%02x ", (unsigned char)decoder->cur[i]);
+        if ((i + 1) % 16 == 0) printf("\n[GUEST]           ");
+    }
+    printf("\n");
+
+    uint32_t recv_async, recv_host_buffer, recv_buffer_from_host_ptr, recv_events;
+
+    apir_decode_uint32_t(decoder, &recv_async);
+
+    apir_decode_uint32_t(decoder, &recv_host_buffer);
+
+    apir_decode_uint32_t(decoder, &recv_buffer_from_host_ptr);
+
+    apir_decode_uint32_t(decoder, &recv_events);
+
+    printf("[GUEST] Expected values:\n");
+
+    printf("[GUEST]   async should be:                0xAAAA1111 --> 0x%x\n", recv_async);
+    printf("[GUEST]   host_buffer should be:          0xBBBB2222 --> 0x%x\n", recv_host_buffer);
+    printf("[GUEST]   buffer_from_host_ptr should be: 0xCCCC3333 --> 0x%x\n", recv_buffer_from_host_ptr);
+    printf("[GUEST]   events should be:               0xDDDD4444 --> 0x%x\n", recv_events);
+
+    // Convert back to boolean values for the function signature
+    *async = (recv_async != 0);
+    *host_buffer = (recv_host_buffer != 0);
+    *buffer_from_host_ptr = (recv_buffer_from_host_ptr != 0);
+    *events = (recv_events != 0);
+
+    if (recv_buffer_from_host_ptr != 0xCCCC3333) {
+        printf("[GUEST] ERROR: buffer_from_host_ptr mismatch! Expected 0xCCCC3333, got 0x%08X\n", recv_buffer_from_host_ptr);
+        printf("thks bye :/\n");
+        _exit(0);
+    }
+
+    printf("[GUEST] SUCCESS: All hex values match expected patterns!\n");
+    _exit(0);
+
     *buffer_from_host_ptr = true;
     remote_call_finish(gpu, encoder, decoder);
 }

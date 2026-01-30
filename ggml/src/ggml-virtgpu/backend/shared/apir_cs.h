@@ -353,11 +353,14 @@ static inline void * apir_decoder_alloc_array(size_t size, size_t count) {
 /* bool */
 
 static inline void apir_encode_bool_t(apir_encoder * enc, const bool * val) {
-    apir_encode(enc, sizeof(int), val, sizeof(bool));
+    int int_val = *val ? 1 : 0;
+    apir_encode(enc, sizeof(int), &int_val, sizeof(int));
 }
 
 static inline void apir_decode_bool_t(apir_decoder * dec, bool * val) {
-    apir_decode(dec, sizeof(int), val, sizeof(bool));
+    int int_val;
+    apir_decode(dec, sizeof(int), &int_val, sizeof(int));
+    *val = (int_val != 0);
 }
 
 /* apir_buffer_type_host_handle_t */
