@@ -6,6 +6,50 @@
 #define GRAPH_COMPUTE_DEBUG 0
 #define GRAPH_LOG(...) do { if (GRAPH_COMPUTE_DEBUG) printf(__VA_ARGS__); } while(0)
 
+// CACHE COHERENCY: Helper functions for graph compute multi-buffer coordination
+static void close_graph_buffer_fds_for_host(const std::unordered_set<apir_buffer_context_t *> & buffer_contexts,
+                                            std::unordered_map<apir_buffer_context_t *, int> & original_fds) {
+    for (apir_buffer_context_t * ctx : buffer_contexts) {
+        if (ctx && ctx->shmem.backend_data) {
+            ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
+            if (winapi_buf->fd >= 0) {
+                original_fds[ctx] = winapi_buf->fd;
+                close(winapi_buf->fd);
+                winapi_buf->fd = -1;
+                GRAPH_LOG("[GRAPH_COMPUTE] Closed FD %d for buffer %p to flush cache\n", original_fds[ctx], ctx->shmem.mmap_ptr);
+            }
+        }
+    }
+}
+
+static void reopen_graph_buffer_fds_after_host(const std::unordered_map<apir_buffer_context_t *, int> & original_fds) {
+    for (const auto & pair : original_fds) {
+        apir_buffer_context_t * ctx = pair.first;
+        int original_fd = pair.second;
+
+        if (ctx && ctx->shmem.backend_data && original_fd >= 0) {
+            ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
+
+            // Reopen file with fresh FD
+            int fresh_fd = open(winapi_buf->file_path, O_RDWR);
+            if (fresh_fd >= 0) {
+                winapi_buf->fd = fresh_fd;
+                GRAPH_LOG("[GRAPH_COMPUTE] Reopened file %s with fresh FD %d\n", winapi_buf->file_path, fresh_fd);
+
+                // Invalidate cache to see host changes
+                if (ctx->shmem.mmap_ptr) {
+                    if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_INVALIDATE) != 0) {
+                        printf("msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
+                    }
+                }
+            } else {
+                printf("FATAL: Failed to reopen file %s: %s\n", winapi_buf->file_path, strerror(errno));
+                exit(1);
+            }
+        }
+    }
+}
+
 static long long current_time_ms() {
     timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);  // Use CLOCK_MONOTONIC for elapsed time
@@ -43,9 +87,12 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
         void * original_ptr;
         size_t size;
         uint32_t res_id;
-        int fd;  // File descriptor for remapping
     };
     std::unordered_map<apir_buffer_context_t *, buffer_mapping_info> original_mappings;
+    std::unordered_map<apir_buffer_context_t *, int> original_fds;
+
+    // CACHE COHERENCY: Close all FDs before unmapping
+    close_graph_buffer_fds_for_host(buffer_contexts, original_fds);
 
     for (apir_buffer_context_t * ctx : buffer_contexts) {
         if (ctx && ctx->shmem.mmap_ptr) {
@@ -54,19 +101,10 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
             info.size = ctx->shmem.mmap_size;
             info.res_id = ctx->shmem.res_id;
 
-            // For Windows: get fd from the winapi shared buffer in backend_data
-            if (ctx->shmem.backend_data) {
-                ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
-                info.fd = winapi_buf->fd;
-            } else {
-                printf("Warning: Windows buffer has no backend_data, skipping unmap\n");
-                continue;
-            }
-
             original_mappings[ctx] = info;
 
-            GRAPH_LOG("[GRAPH_COMPUTE] Unmapping buffer %p (size=%zu, res_id=%u, fd=%d)\n",
-                       info.original_ptr, info.size, info.res_id, info.fd);
+            GRAPH_LOG("[GRAPH_COMPUTE] Unmapping buffer %p (size=%zu, res_id=%u)\n",
+                       info.original_ptr, info.size, info.res_id);
 
             // Flush writes before unmapping to ensure host sees them
             if (msync(info.original_ptr, info.size, MS_SYNC) != 0) {
@@ -79,12 +117,6 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
             } else {
                 ctx->shmem.mmap_ptr = NULL; // Mark as unmapped
                 GRAPH_LOG("[GRAPH_COMPUTE] Successfully unmapped buffer %p\n", info.original_ptr);
-            }
-
-            // CACHE COHERENCY: Close FD to flush WSL2 filesystem cache
-            if (info.fd >= 0) {
-                close(info.fd);
-                GRAPH_LOG("[GRAPH_COMPUTE] Closed FD %d for buffer %p to flush cache\n", info.fd, info.original_ptr);
             }
         }
     }
@@ -126,6 +158,9 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     remote_call_finish(gpu, encoder, decoder);
 
     // Step 4: Remap all unmapped buffers back to their original addresses
+    // CACHE COHERENCY: Reopen all FDs with fresh handles first
+    reopen_graph_buffer_fds_after_host(original_fds);
+
     for (auto & pair : original_mappings) {
         apir_buffer_context_t * ctx = pair.first;
         buffer_mapping_info & info = pair.second;
@@ -135,18 +170,12 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
                        info.original_ptr, info.size, info.res_id);
 
             void * remapped = NULL;
-
-            // CACHE COHERENCY: Reopen file with fresh FD to see host changes
             int fresh_fd = -1;
+
+            // Get the fresh FD that was reopened
             if (ctx->shmem.backend_data) {
                 ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
-                fresh_fd = open(winapi_buf->file_path, O_RDWR);
-                if (fresh_fd < 0) {
-                    printf("FATAL: Failed to reopen file %s: %s\n", winapi_buf->file_path, strerror(errno));
-                    exit(1);
-                }
-                winapi_buf->fd = fresh_fd; // Update the fd in the buffer struct
-                GRAPH_LOG("[GRAPH_COMPUTE] Reopened file %s with fresh FD %d\n", winapi_buf->file_path, fresh_fd);
+                fresh_fd = winapi_buf->fd;
             } else {
                 printf("FATAL: No backend_data for buffer remapping\n");
                 exit(1);
@@ -178,11 +207,6 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
             ctx->shmem.mmap_ptr = remapped;
             GRAPH_LOG("[GRAPH_COMPUTE] Successfully remapped buffer to %p\n", remapped);
-
-            // CACHE COHERENCY: Invalidate cache to see host changes
-            if (msync(remapped, info.size, MS_INVALIDATE) != 0) {
-                printf("msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
-            }
         }
     }
 
