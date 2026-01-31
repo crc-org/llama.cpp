@@ -6,10 +6,14 @@
 #include "shared/apir_backend.h"
 
 #include <cstdint>
+#include <unordered_set>
+#include <vector>
 
 // CACHE COHERENCY: External functions for buffer management (defined in main.cpp)
 extern "C" void unmap_all_session_buffers(uint32_t session_id);
 extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id);
+extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
+extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
 
 uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(enc);
@@ -41,6 +45,36 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     ggml_cgraph * cgraph = apir_decode_ggml_cgraph(&secondary_dec, cgraph_size);
 
+    // Extract unique buffer handles from decoded graph tensors for cache coherency
+    std::unordered_set<uint64_t> buffer_handles_set;
+
+    // Process all nodes in the graph
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        ggml_tensor * node = cgraph->nodes[i];
+        if (node->buffer) {
+            // Convert ggml_backend_buffer_t to buffer handle/ID
+            uint64_t buffer_handle = (uint64_t)(uintptr_t)node->buffer;
+            buffer_handles_set.insert(buffer_handle);
+        }
+
+        // Also check source tensors
+        for (int j = 0; j < GGML_MAX_SRC && node->src[j]; j++) {
+            if (node->src[j]->buffer) {
+                uint64_t buffer_handle = (uint64_t)(uintptr_t)node->src[j]->buffer;
+                buffer_handles_set.insert(buffer_handle);
+            }
+        }
+
+        // Check view source
+        if (node->view_src && node->view_src->buffer) {
+            uint64_t buffer_handle = (uint64_t)(uintptr_t)node->view_src->buffer;
+            buffer_handles_set.insert(buffer_handle);
+        }
+    }
+
+    // Convert to array for passing to C functions
+    std::vector<uint64_t> buffer_handles(buffer_handles_set.begin(), buffer_handles_set.end());
+
     ggml_status status;
 #if APIR_BACKEND_CHECK_SUPPORTS_OP == 1
     for (int idx = 0; idx < cgraph->n_nodes; idx++) {
@@ -57,13 +91,8 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // CACHE COHERENCY: Unmap all buffers to flush cached data
-    printf("[BACKEND] Unmapping all session buffers for cache coherency...\n");
-    unmap_all_session_buffers(ctx->ctx_id);
-
-    // CACHE COHERENCY: Remap all buffers at original addresses for computation
-    printf("[BACKEND] Remapping all session buffers for computation...\n");
-    ensure_all_session_buffers_mapped(ctx->ctx_id);
+    // CACHE COHERENCY: Guest/Host file handoff - close host FDs and reopen fresh ones
+    close_and_reopen_specific_session_files(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
 
     // Run the actual computation
     status = bck->iface.graph_compute(bck, cgraph);
@@ -72,8 +101,12 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
         bck->iface.synchronize(bck);
     }
 
+    // CACHE COHERENCY: Close host FDs to flush results back to guest
+    close_specific_session_files_for_guest(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
+
     apir_encode_ggml_status(enc, &status);
 
     return 0;
 }
+
 

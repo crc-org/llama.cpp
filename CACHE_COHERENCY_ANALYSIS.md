@@ -66,3 +66,54 @@ We need to implement the **guest/host handoff pattern** like command/reply buffe
 - Guest closes file descriptors to flush to disk
 - Host opens fresh file handles to see flushed data
 - This forces cache coherency across the WSL2/Windows filesystem boundary
+
+---
+
+## ✅ **IMPLEMENTED: Guest/Host File Handoff Pattern for Data Buffers**
+
+### **Guest Side (virtgpu-forward-backend.cpp):**
+
+**Before REMOTE_CALL:**
+1. **Extract buffer contexts** from computation graph
+2. **Close all FDs** → `close(fd)` to flush guest writes to disk
+3. **Unmap memory** → `munmap()` to invalidate guest mappings
+4. **Mark FDs as closed** → `winapi_buf->fd = -1`
+
+**After REMOTE_CALL:**
+1. **Reopen files** → `open(file_path, O_RDWR)` for fresh data
+2. **Remap memory** → `mmap()` at original address if possible
+3. **Update FD references** → `winapi_buf->fd = new_fd`
+
+### **Host Side (windows-service/main.cpp):**
+
+**Before Computation (`close_and_reopen_session_files`):**
+1. **Close all handles** → `CloseHandle()` on file/mapping handles
+2. **Reopen files fresh** → `CreateFileA()` to see guest data
+3. **Create fresh mappings** → `CreateFileMappingA()`
+
+**After Computation (`close_session_files_for_guest`):**
+1. **Flush mapped views** → `FlushViewOfFile()`
+2. **Unmap memory** → `UnmapViewOfFile()`
+3. **Flush file buffers** → `FlushFileBuffers()`
+4. **Close all handles** → `CloseHandle()` to flush to disk for guest
+
+**On-Demand Access (`windows_get_shmem_ptr`):**
+- **Reopen if needed** → Handles invalid file handles gracefully
+- **Fresh mapping** → Always creates valid mappings for backend access
+
+### **Complete Cache Coherency Flow:**
+```
+Guest: Write data → Close FDs (flush to disk)
+  ↓
+Host: Reopen fresh → See guest data → Compute → Close FDs (flush results)
+  ↓
+Guest: Reopen fresh → See host results
+```
+
+### **🎯 Expected Result:**
+This implements the exact same pattern as working command/reply buffers:
+- **Forces cache coherency** across WSL2/Windows filesystem boundary
+- **Fresh file handles** guarantee seeing latest data
+- **Proper sequencing** ensures no race conditions
+
+**Status: Ready for testing! 🚀**
