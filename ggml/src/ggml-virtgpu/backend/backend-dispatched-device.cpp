@@ -135,26 +135,10 @@ uint32_t backend_device_get_props(apir_encoder * enc, apir_decoder * dec, virgl_
     ggml_backend_dev_props props;
     dev->iface.get_props(dev, &props);
 
-    // Send distinctive hex values instead of actual booleans
-    uint32_t test_async = 0xAAAA1111;
-    uint32_t test_host_buffer = 0xBBBB2222;
-    uint32_t test_buffer_from_host_ptr = 0xCCCC3333;
-    uint32_t test_events = 0xDDDD4444;
-
-    printf("[BACKEND_DISPATCHER]   Encoding async = 0x%08X\n", test_async);
-    apir_encode_uint32_t(enc, &test_async);
-
-    printf("[BACKEND_DISPATCHER]   Encoding host_buffer = 0x%08X\n", test_host_buffer);
-    apir_encode_uint32_t(enc, &test_host_buffer);
-
-    printf("[BACKEND_DISPATCHER]   Encoding buffer_from_host_ptr = 0x%08X\n", test_buffer_from_host_ptr);
-    apir_encode_uint32_t(enc, &test_buffer_from_host_ptr);
-
-    printf("[BACKEND_DISPATCHER]   Encoding events = 0x%08X\n", test_events);
-    apir_encode_uint32_t(enc, &test_events);
-
-    printf("[BACKEND_DISPATCHER] All values encoded successfully\n");
-    fflush(stdout);
+    apir_encode_bool_t(enc, &props.caps.async);
+    apir_encode_bool_t(enc, &props.caps.host_buffer);
+    apir_encode_bool_t(enc, &props.caps.buffer_from_host_ptr);
+    apir_encode_bool_t(enc, &props.caps.events);
 
     return 0;
 }

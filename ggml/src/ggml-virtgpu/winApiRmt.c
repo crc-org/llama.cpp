@@ -26,7 +26,7 @@
 #include <netinet/in.h> // For ntohl(), htonl()
 
 /* Function name mapping for client-side logging */
-const char * frontend_command_name(int cmd_type) {
+static const char * frontend_command_name(int cmd_type) {
     switch (cmd_type) {
         case 0: return "backend_device_get_device_count";
         case 1: return "backend_device_get_count";
@@ -411,9 +411,7 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
         return NULL;
     }
 
-    /* Log frontend dispatcher call */
-    const char * method_name = frontend_command_name(cmd_flags);
-    printf("[FRONTEND_DISPATCHER] Calling method: %s (cmd_type=%d)\n", method_name, cmd_flags);
+    // printf("[FRONTEND_DISPATCHER] Calling method: %s (cmd_type=%d)\n", frontend_command_name(cmd_flags), cmd_flags);
 
     virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
 

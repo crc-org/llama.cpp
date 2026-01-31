@@ -2080,7 +2080,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     // Read APIR header values and advance pointer properly
     char* apir_data_start = (char*)input_mapped_memory;
-    printf("[DEBUG] cmd_type=%u, reading APIR header\n", cmd_type);
 
 #define READ_APIR_HEADER(buffer_ptr, main_cmd, secondary_cmd) \
     do { \
@@ -2090,7 +2089,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         /* Read secondary cmd_type (specific function ID) */ \
         secondary_cmd = *((int32_t*)(buffer_ptr)); \
         buffer_ptr += sizeof(int32_t); \
-        printf("[DEBUG] Read APIR header: main_cmd=%u, secondary_cmd=%d\n", main_cmd, secondary_cmd); \
     } while (0)
 
     uint32_t main_cmd_type;
@@ -2105,8 +2103,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     if (secondary_cmd_type != (int32_t)cmd_type) {
         printf("[ERROR] Expected secondary_cmd_type=%u, got %d\n", cmd_type, secondary_cmd_type);
     }
-
-    printf("[DEBUG] APIR header processed, pointer advanced by %zu bytes\n", sizeof(uint32_t) + sizeof(int32_t));
 
     // Reserve space for return code at beginning of response buffer
     uint32_t* return_code_pos = (uint32_t*)response_mapped_memory;
