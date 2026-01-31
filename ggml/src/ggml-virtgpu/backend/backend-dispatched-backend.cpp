@@ -61,8 +61,8 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     printf("[BACKEND] Unmapping all session buffers for cache coherency...\n");
     unmap_all_session_buffers(ctx->ctx_id);
 
-    // CACHE COHERENCY: Map all buffers with fresh mappings for computation
-    printf("[BACKEND] Mapping all session buffers for computation...\n");
+    // CACHE COHERENCY: Remap all buffers at original addresses for computation
+    printf("[BACKEND] Remapping all session buffers for computation...\n");
     ensure_all_session_buffers_mapped(ctx->ctx_id);
 
     // Run the actual computation
@@ -71,10 +71,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     if (async_backend) {
         bck->iface.synchronize(bck);
     }
-
-    // CACHE COHERENCY: Unmap all buffers so guest sees fresh data
-    printf("[BACKEND] Unmapping all session buffers post-computation...\n");
-    unmap_all_session_buffers(ctx->ctx_id);
 
     apir_encode_ggml_status(enc, &status);
 

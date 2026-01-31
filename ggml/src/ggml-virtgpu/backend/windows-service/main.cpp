@@ -147,6 +147,7 @@ struct BufferMapping {
     HANDLE file_handle;
     HANDLE mapping_handle;
     void* mapped_memory;
+    void* original_address;  // Track original mapping address for cache coherency
     size_t size;
     std::string file_path;
 };
@@ -209,6 +210,11 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
     if (mapping.mapped_memory == NULL) {
         printf("[BACKEND] On-demand mapping buffer %u for session %u\n", res_id, session_id);
 
+        // Force file data to be flushed to ensure cache coherency
+        if (!FlushFileBuffers(mapping.file_handle)) {
+            printf("[WARNING] FlushFileBuffers failed: GetLastError=%lu\n", GetLastError());
+        }
+
         mapping.mapped_memory = MapViewOfFile(
             mapping.mapping_handle,
             FILE_MAP_ALL_ACCESS,
@@ -222,6 +228,13 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
                    res_id, GetLastError());
             return NULL;
         }
+
+        // Store original address for potential remapping
+        if (mapping.original_address == NULL) {
+            mapping.original_address = mapping.mapped_memory;
+        }
+
+        printf("[BACKEND] Successfully mapped buffer %u at address %p\n", res_id, mapping.mapped_memory);
     }
 
     return mapping.mapped_memory;
@@ -244,6 +257,9 @@ extern "C" void unmap_all_session_buffers(uint32_t session_id) {
     for (auto& [buffer_id, mapping] : session.buffers) {
         if (mapping.mapped_memory != NULL) {
             printf("[BACKEND] Unmapping buffer %u (ptr=%p)\n", buffer_id, mapping.mapped_memory);
+
+            // Store original address for remapping at same location
+            mapping.original_address = mapping.mapped_memory;
 
             if (!UnmapViewOfFile(mapping.mapped_memory)) {
                 printf("[ERROR] Failed to unmap buffer %u: GetLastError=%lu\n",
@@ -270,20 +286,37 @@ extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id) {
 
     // Ensure all buffers in the session are mapped
     for (auto& [buffer_id, mapping] : session.buffers) {
-        if (mapping.mapped_memory == NULL) {
-            printf("[BACKEND] Mapping buffer %u for operation\n", buffer_id);
+        if (mapping.mapped_memory == NULL && mapping.original_address != NULL) {
+            printf("[BACKEND] Remapping buffer %u at original address %p\n",
+                   buffer_id, mapping.original_address);
 
-            mapping.mapped_memory = MapViewOfFile(
+            // Try to remap at the original address
+            mapping.mapped_memory = MapViewOfFileEx(
                 mapping.mapping_handle,
                 FILE_MAP_ALL_ACCESS,
                 0,
                 0,
-                0
+                0,
+                mapping.original_address  // Force same address
             );
 
             if (mapping.mapped_memory == NULL) {
-                printf("[ERROR] Failed to map buffer %u for operation: GetLastError=%lu\n",
-                       buffer_id, GetLastError());
+                printf("[ERROR] Failed to remap buffer %u at original address %p: GetLastError=%lu\n",
+                       buffer_id, mapping.original_address, GetLastError());
+
+                // Fallback: let Windows choose (this will break backend buffers)
+                mapping.mapped_memory = MapViewOfFile(
+                    mapping.mapping_handle,
+                    FILE_MAP_ALL_ACCESS,
+                    0,
+                    0,
+                    0
+                );
+                printf("[WARNING] Buffer %u remapped to different address %p\n",
+                       buffer_id, mapping.mapped_memory);
+            } else {
+                printf("[BACKEND] Successfully remapped buffer %u at original address %p\n",
+                       buffer_id, mapping.mapped_memory);
             }
         }
     }
@@ -2324,6 +2357,7 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
     mapping.file_handle = file_handle;
     mapping.mapping_handle = mapping_handle;
     mapping.mapped_memory = mapped_memory;  // NULL - will be mapped on-demand
+    mapping.original_address = NULL;       // Will be set when first mapped
     mapping.size = (size_t)existing_file_size.QuadPart;
     mapping.file_path = file_path;
 
@@ -2434,6 +2468,7 @@ DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request
     mapping.file_handle = file_handle;
     mapping.mapping_handle = mapping_handle;
     mapping.mapped_memory = mapped_memory;
+    mapping.original_address = mapped_memory;  // Store original address for cache coherency
     mapping.size = (size_t)buffer_size;
     mapping.file_path = file_path;
 
