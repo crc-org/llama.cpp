@@ -1,4 +1,5 @@
 #include "virtgpu-forward-impl.h"
+#include <unordered_set>
 
 static long long current_time_ms() {
     timespec ts;
@@ -10,6 +11,43 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
+
+    // Step 1: Find all unique buffer contexts involved in the graph
+    std::unordered_set<apir_buffer_context_t *> buffer_contexts;
+    for (uint32_t i = 0; i < cgraph->n_nodes; i++) {
+        ggml_tensor * node = cgraph->nodes[i];
+        if (node->buffer) {
+            apir_buffer_context_t * ctx = BUFFER_TO_APIR_CONTEXT(node->buffer);
+            buffer_contexts.insert(ctx);
+        }
+        // Also check source tensors
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            if (node->src[j] && node->src[j]->buffer) {
+                apir_buffer_context_t * ctx = BUFFER_TO_APIR_CONTEXT(node->src[j]->buffer);
+                buffer_contexts.insert(ctx);
+            }
+        }
+        if (node->view_src && node->view_src->buffer) {
+            apir_buffer_context_t * ctx = BUFFER_TO_APIR_CONTEXT(node->view_src->buffer);
+            buffer_contexts.insert(ctx);
+        }
+    }
+
+    // Step 2: Flush buffer data to ensure cache coherency
+    // For now, we'll use msync to flush writes without unmapping
+    // TODO: Implement unmap/remap strategy once we understand the Windows buffer system better
+
+    for (apir_buffer_context_t * ctx : buffer_contexts) {
+        if (ctx && ctx->shmem.mmap_ptr) {
+            printf("[GRAPH_COMPUTE] Flushing buffer %p (size=%zu)\n",
+                   ctx->shmem.mmap_ptr, ctx->shmem.mmap_size);
+
+            // Flush writes to ensure host sees them
+            if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_SYNC) != 0) {
+                printf("msync failed for buffer: %s\n", strerror(errno));
+            }
+        }
+    }
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE);
 
@@ -46,6 +84,18 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     apir_decode_ggml_status(decoder, &status);
 
     remote_call_finish(gpu, encoder, decoder);
+
+    // Step 4: Post-compute invalidation to see host changes
+    // Invalidate guest cache to see any host writes to the buffers
+    for (apir_buffer_context_t * ctx : buffer_contexts) {
+        if (ctx && ctx->shmem.mmap_ptr) {
+            printf("[GRAPH_COMPUTE] Invalidating buffer %p cache\n", ctx->shmem.mmap_ptr);
+
+            if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_INVALIDATE) != 0) {
+                printf("msync MS_INVALIDATE failed for buffer: %s\n", strerror(errno));
+            }
+        }
+    }
 
     // Unlock mutex before cleanup
     if (using_shared_shmem) {
