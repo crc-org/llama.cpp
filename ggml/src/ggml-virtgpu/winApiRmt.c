@@ -30,9 +30,18 @@ static void windows_shmem_destroy(virtgpu* gpu, virtgpu_shmem* shmem);
 const size_t WINAPI_REPLY_BUFFER_SIZE = 16 * 1024 * 1024;  // 16MB
 const size_t WINAPI_DATA_BUFFER_SIZE = 256 * 1024 * 1024;  // 256MB
 
+/* Per-request temporary files for Windows backend */
+typedef struct {
+    char cmd_file_path[256];
+    char reply_file_path[256];
+    void* temp_cmd_data;
+    size_t temp_cmd_data_size;
+} virtgpu_temp_request;
+
 /* Windows backend-specific data */
 typedef struct {
     ggml_winapi_handle_t winapi_handle;
+    virtgpu_temp_request temp_request;
 } virtgpu_windows_data;
 
 /* Windows shmem backend data */
@@ -179,28 +188,40 @@ static void windows_destroy(virtgpu* gpu) {
 }
 
 static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_cmd_type, int32_t cmd_flags) {
+    static uint32_t temp_counter = 0;
 
     if (!gpu || !gpu->backend_data) {
         printf("[CLIENT] ERROR: Invalid virtgpu handle in remote_call_prepare\n");
         return NULL;
     }
 
-    /* Use the dedicated shared command buffer to avoid collision with data buffer */
-    void* buffer_ptr = virtgpu_shmem_get_ptr(&gpu->command_shmem);
-    size_t buffer_size = gpu->command_shmem.mmap_size;
+    virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
 
-    if (!buffer_ptr || buffer_size == 0) {
-        GGML_LOG_ERROR("Invalid data buffer in remote_call_prepare\n");
+    /* Generate unique temporary file paths */
+    uint32_t counter = __atomic_fetch_add(&temp_counter, 1, __ATOMIC_SEQ_CST);
+    snprintf(win_data->temp_request.cmd_file_path, sizeof(win_data->temp_request.cmd_file_path),
+             "/mnt/c/temp/ggml_temp_cmd_win_%u.dat", counter);
+    snprintf(win_data->temp_request.reply_file_path, sizeof(win_data->temp_request.reply_file_path),
+             "/mnt/c/temp/ggml_temp_reply_win_%u.dat", counter);
+
+    /* Allocate temporary buffer for encoding */
+    size_t buffer_size = 4096;  // 4KB for command buffer
+    win_data->temp_request.temp_cmd_data = malloc(buffer_size);
+    if (!win_data->temp_request.temp_cmd_data) {
+        printf("Failed to allocate temporary command buffer\n");
         return NULL;
     }
+    win_data->temp_request.temp_cmd_data_size = buffer_size;
 
-    /* Clear the shared command buffer before use to avoid garbage data */
-    memset(buffer_ptr, 0, buffer_size);
+    /* Clear the buffer */
+    memset(win_data->temp_request.temp_cmd_data, 0, buffer_size);
 
-    /* Create APIR encoder using winApiRmt shared buffer */
-    struct apir_encoder* encoder = apir_encoder_init(buffer_ptr, buffer_size);
+    /* Create APIR encoder using temporary buffer */
+    struct apir_encoder* encoder = apir_encoder_init(win_data->temp_request.temp_cmd_data, buffer_size);
     if (!encoder) {
-        GGML_LOG_ERROR("Failed to initialize APIR encoder\n");
+        printf("Failed to initialize APIR encoder\n");
+        free(win_data->temp_request.temp_cmd_data);
+        win_data->temp_request.temp_cmd_data = NULL;
         return NULL;
     }
 
@@ -213,50 +234,65 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
 
 static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, struct apir_decoder** dec, uint64_t timeout_ms, long long* call_duration_ns) {
     if (!gpu || !gpu->backend_data || !enc || !dec) {
-        GGML_LOG_ERROR("Invalid parameters in remote_call\n");
+        printf("Invalid parameters in remote_call\n");
         return APIR_FORWARD_INVALID_ARGUMENT;
     }
 
     virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
     uint64_t start_time = get_time_ns();
 
-    /* Get encoded data size and validate */
+    /* Get encoded data size */
     size_t encoded_size = apir_encoder_get_encoded_size(enc);
 
-    if (encoded_size > gpu->command_shmem.mmap_size) {
-        GGML_LOG_ERROR("Encoded data size %zu exceeds command buffer size %zu\n",
-               encoded_size, gpu->command_shmem.mmap_size);
-        return APIR_FORWARD_INVALID_ARGUMENT;
+    /* Write command data to temporary file */
+    FILE* cmd_file = fopen(win_data->temp_request.cmd_file_path, "wb");
+    if (!cmd_file) {
+        printf("Failed to create command file: %s\n", win_data->temp_request.cmd_file_path);
+        return APIR_FORWARD_HYPERCALL_ERROR;
     }
 
-    /* Send via Windows client using JSON protocol - use encoded command data */
+    size_t written = fwrite(enc->start, 1, encoded_size, cmd_file);
+    fclose(cmd_file);
+
+    if (written != encoded_size) {
+        printf("Failed to write complete command data: %zu/%zu bytes\n", written, encoded_size);
+        return APIR_FORWARD_HYPERCALL_ERROR;
+    }
+
+    /* Send request using temporary file approach */
     size_t actual_response_size = 0;
-    int winapi_ret = ggml_winapi_send_apir_command(win_data->winapi_handle,
-                                                  enc->start,
-                                                  encoded_size,
-                                                  virtgpu_shmem_get_ptr(&gpu->reply_shmem),
-                                                  gpu->reply_shmem.mmap_size,
-                                                  &actual_response_size);
+    int winapi_ret = ggml_winapi_send_temp_file_request(win_data->winapi_handle,
+                                                       win_data->temp_request.cmd_file_path,
+                                                       win_data->temp_request.reply_file_path,
+                                                       encoded_size,
+                                                       &actual_response_size);
     if (winapi_ret != GGML_WINAPI_OK) {
-        GGML_LOG_ERROR("ggml_winapi_send_apir_command failed with code %d\n", winapi_ret);
+        printf("ggml_winapi_send_temp_file_request failed with code %d\n", winapi_ret);
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
 
-    /* Response should be in the reply buffer */
-    void* reply_ptr = virtgpu_shmem_get_ptr(&gpu->reply_shmem);
-    size_t reply_size = gpu->reply_shmem.mmap_size;
-
-    if (!reply_ptr) {
+    /* Read response from temporary file */
+    FILE* reply_file = fopen(win_data->temp_request.reply_file_path, "rb");
+    if (!reply_file) {
+        printf("Failed to open reply file: %s\n", win_data->temp_request.reply_file_path);
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
 
-    /* Initialize decoder with reply buffer */
-    *dec = apir_decoder_init(reply_ptr, reply_size);
+    static char reply_buffer[16 * 1024 * 1024];  // 16MB static buffer
+    size_t bytes_read = fread(reply_buffer, 1, actual_response_size, reply_file);
+    fclose(reply_file);
+
+    if (bytes_read != actual_response_size) {
+        printf("Failed to read complete reply data: %zu/%zu bytes\n", bytes_read, actual_response_size);
+        return APIR_FORWARD_HYPERCALL_ERROR;
+    }
+
+    /* Initialize decoder with reply data */
+    *dec = apir_decoder_init(reply_buffer, actual_response_size);
     if (!*dec) {
-        GGML_LOG_ERROR("Failed to initialize APIR decoder\n");
+        printf("Failed to initialize APIR decoder\n");
         return APIR_FORWARD_HYPERCALL_ERROR;
     }
-
 
     /* Calculate call duration */
     if (call_duration_ns) {
@@ -276,7 +312,26 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
 }
 
 static void windows_remote_call_finish(virtgpu* gpu, struct apir_encoder* enc, struct apir_decoder* dec) {
-    (void)gpu; // gpu not needed for cleanup in Windows implementation
+    if (gpu && gpu->backend_data) {
+        virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
+
+        /* Clean up temporary files */
+        if (win_data->temp_request.cmd_file_path[0]) {
+            unlink(win_data->temp_request.cmd_file_path);
+            win_data->temp_request.cmd_file_path[0] = '\0';
+        }
+        if (win_data->temp_request.reply_file_path[0]) {
+            unlink(win_data->temp_request.reply_file_path);
+            win_data->temp_request.reply_file_path[0] = '\0';
+        }
+
+        /* Free temporary command buffer */
+        if (win_data->temp_request.temp_cmd_data) {
+            free(win_data->temp_request.temp_cmd_data);
+            win_data->temp_request.temp_cmd_data = NULL;
+            win_data->temp_request.temp_cmd_data_size = 0;
+        }
+    }
 
     if (enc) {
         apir_encoder_deinit(enc);

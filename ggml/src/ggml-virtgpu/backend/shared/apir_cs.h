@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ggml-impl.h"
+#include "apir_backend.h"
 
 #include <cassert>
 #include <cstring>
@@ -97,7 +98,8 @@ static inline bool apir_decoder_peek_internal(apir_decoder * dec,
     assert(val_size <= size);
 
     if (unlikely(size > (size_t) (dec->end - dec->cur))) {
-        GGML_LOG_ERROR("reading too much from the decoder ...\n");
+        GGML_LOG_ERROR("reading too much from the decoder: requested=%zu, available=%zd, cur=%p, end=%p\n",
+                       size, (size_t)(dec->end - dec->cur), dec->cur, dec->end);
         apir_decoder_set_fatal(dec);
         memset(val, 0, val_size);
         return false;
@@ -114,7 +116,8 @@ static inline void apir_decoder_peek(apir_decoder * dec, size_t size, void * val
 
 static inline const void * apir_decoder_use_inplace(apir_decoder * dec, size_t size) {
     if (unlikely(size > (size_t) (dec->end - dec->cur))) {
-        GGML_LOG_ERROR("reading too much from the decoder ...\n");
+        GGML_LOG_ERROR("reading too much from the decoder: requested=%zu, available=%zd, cur=%p, end=%p\n",
+                       size, (size_t)(dec->end - dec->cur), dec->cur, dec->end);
         apir_decoder_set_fatal(dec);
         return NULL;
     }

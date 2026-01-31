@@ -80,6 +80,13 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
                                  size_t response_buffer_size,
                                  size_t* response_size);
 
+/* Send APIR command using temporary files */
+int ggml_winapi_send_temp_file_request(ggml_winapi_handle_t handle,
+                                      const char* cmd_file_path,
+                                      const char* reply_file_path,
+                                      size_t cmd_data_size,
+                                      size_t* actual_response_size);
+
 /* Test connectivity (optional - for debugging) */
 int ggml_winapi_echo(ggml_winapi_handle_t handle,
                     const char *input,

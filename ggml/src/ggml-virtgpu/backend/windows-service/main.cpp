@@ -138,6 +138,10 @@ static SERVICE_STATUS_HANDLE g_service_status_handle = NULL;
 static SERVICE_STATUS g_service_status = {0};
 static BOOL g_force_tcp = TRUE;  // Default to TCP mode
 
+// Global variables for response handling
+static size_t g_last_response_size = 12;  // Default fallback
+static char g_response_file_path[512] = "";  // Store response file path
+
 // APIR Backend Global State - Per-Client Buffer Management
 struct BufferMapping {
     HANDLE file_handle;
@@ -155,7 +159,6 @@ struct ClientSession {
 static std::map<uint32_t, ClientSession> g_client_sessions;
 static std::mutex g_buffer_mutex;
 static uint32_t g_next_session_id = 1;
-static char g_response_file_path[512] = "";
 
 // Windows-specific APIR callback implementations
 const char* windows_get_config(uint32_t virgl_ctx_id, const char* key) {
@@ -303,7 +306,7 @@ DWORD HandleEchoAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 DWORD HandleBufferTestAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandlePerformanceAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleSharedBufferAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
-DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
+DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response, const std::string& response_file_path = "");
 DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response);
 DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT32 buffer_id, const std::string& file_path, Json::Value& response);
 
@@ -1157,6 +1160,7 @@ DWORD HandleClient(SOCKET client_socket)
  */
 DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* response_json, size_t response_size)
 {
+    printf("[DEBUG] Received JSON request: %s\n", request_json);
 
     Json::Value request, response;
     Json::StreamWriterBuilder builder;
@@ -1173,6 +1177,13 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         parse_result = reader->parse(json_copy.c_str(),
                                    json_copy.c_str() + json_copy.length(),
                                    &request, &parse_errors);
+        printf("[DEBUG] JSON library parse_result: %s\n", parse_result ? "SUCCESS" : "FAILED");
+        if (!parse_result) {
+            printf("[DEBUG] JSON parse errors: %s\n", parse_errors.c_str());
+        }
+        if (parse_result) {
+            printf("[DEBUG] JSON library extracted apir_cmd_type: %u\n", request.get("apir_cmd_type", 0).asUInt());
+        }
     } catch (const std::exception& e) {
         printf("[ERROR] Exception during parsing: %s\n", e.what());
         parse_result = false;
@@ -1189,17 +1200,19 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     }
 
     // Manual JSON parsing since jsoncpp is crashing on field access
-    // JSON format: {"api":"apir","request_id":1,"apir_cmd_type":2,"apir_data_size":8,"shared_file_path":"/path","buffer_id":3,"response_buffer_id":1}
+    // JSON format: {"api":"apir","request_id":1,"apir_cmd_type":2,"apir_data_size":8,"shared_file_path":"/path","response_file_path":"/reply","buffer_id":3,"response_buffer_id":1}
     std::string api;
     UINT32 request_id;
     UINT32 apir_cmd_type;
     UINT32 apir_data_size;
     std::string shared_file_path;
+    std::string response_file_path;
     UINT32 buffer_id;
     UINT32 response_buffer_id;
 
     // Simple manual parsing - more reliable than buggy jsoncpp
     const char* json_str = json_copy.c_str();
+    printf("[DEBUG] JSON for manual parsing: %s\n", json_str);
 
     // Extract api field: "api":"apir"
     const char* api_start = strstr(json_str, "\"api\":\"");
@@ -1229,8 +1242,9 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     if (cmd_type_start) {
         cmd_type_start += 16; // Skip "apir_cmd_type":
         apir_cmd_type = (UINT32)strtoul(cmd_type_start, NULL, 10);
+        printf("[DEBUG] Parsed apir_cmd_type from JSON: %u (from string: %.10s)\n", apir_cmd_type, cmd_type_start);
     } else {
-        apir_cmd_type = 0;
+        apir_cmd_type = 255;
     }
 
     // Extract apir_data_size field
@@ -1254,6 +1268,25 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         }
     } else {
         shared_file_path = "";
+    }
+
+    // Extract response_file_path field: "response_file_path":"/reply"
+    const char* resp_path_start = strstr(json_str, "\"response_file_path\":\"");
+    if (resp_path_start) {
+        resp_path_start += 22; // Skip "response_file_path":"
+        const char* resp_path_end = strchr(resp_path_start, '"');
+        if (resp_path_end) {
+            response_file_path = std::string(resp_path_start, resp_path_end - resp_path_start);
+            // Store in global variable for JSON response
+            strncpy(g_response_file_path, response_file_path.c_str(), sizeof(g_response_file_path) - 1);
+            g_response_file_path[sizeof(g_response_file_path) - 1] = '\0';
+        } else {
+            response_file_path = "";
+            g_response_file_path[0] = '\0';
+        }
+    } else {
+        response_file_path = "";
+        g_response_file_path[0] = '\0';
     }
 
     // Extract buffer_id field
@@ -1387,7 +1420,8 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     }
     else if (api == "apir") {
         try {
-            result = HandleAPIRAPI(client_socket, request, response);
+
+            result = HandleAPIRAPI(client_socket, request, response, response_file_path);
             fflush(stdout);
 
             // Special handling for APIR initialization errors to avoid Json::Value crashes
@@ -1476,11 +1510,11 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
                         "\"result\":{"
                             "\"cmd_type\":%u,"
                             "\"dispatch_result\":1,"
-                            "\"response_size\":12,"
+                            "\"response_size\":%zu,"
                             "\"status\":\"success\","
                             "\"error_code\":0"
                         "}}",
-                        request_id, g_response_file_path, apir_cmd_type);
+                        request_id, g_response_file_path, apir_cmd_type, g_last_response_size);
 
                 fflush(stdout);
                 return ERROR_SUCCESS;  // Return success with success payload
@@ -1840,9 +1874,17 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
 /*
  * Handle APIR API
  */
-DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response)
+DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response, const std::string& response_file_path)
 {
     UINT32 cmd_type = request.get("apir_cmd_type", 0).asUInt();
+    printf("[DEBUG] HandleAPIRAPI: JSON library extracted cmd_type=%u\n", cmd_type);
+    printf("[DEBUG] HandleAPIRAPI: request.isMember(\"apir_cmd_type\")=%s\n",
+           request.isMember("apir_cmd_type") ? "true" : "false");
+    if (request.isMember("apir_cmd_type")) {
+        printf("[DEBUG] HandleAPIRAPI: raw value type=%d, raw value as uint=%u\n",
+               request["apir_cmd_type"].type(),
+               request["apir_cmd_type"].asUInt());
+    }
     UINT64 apir_data_size = request.get("apir_data_size", 0).asUInt64();
     UINT32 buffer_id = request.get("buffer_id", 0).asUInt();
     UINT32 response_buffer_id = request.get("response_buffer_id", buffer_id).asUInt(); // Default to input buffer if not specified
@@ -1898,35 +1940,146 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     auto& session = session_it->second;
 
-    // Find input buffer (for APIR command data)
-    auto input_buffer_it = session.buffers.find(buffer_id);
-    if (input_buffer_it == session.buffers.end()) {
-        printf("[DEBUG] HandleAPIRAPI: Input buffer %u not found in session %u\n", buffer_id, session_id);
+    // Temporary files are now mandatory - no fallback to persistent buffers
+    if (!shared_file_path_cstr || strlen(shared_file_path_cstr) == 0) {
+        printf("[ERROR] HandleAPIRAPI: shared_file_path is required for temporary file approach\n");
         return ERROR_INVALID_PARAMETER;
     }
 
-    BufferMapping& input_buffer_mapping = input_buffer_it->second;
-    void* input_mapped_memory = input_buffer_mapping.mapped_memory;
-    size_t input_buffer_size = input_buffer_mapping.size;
+    // Convert WSL2 path to Windows path for command file
+    std::string windows_cmd_path = shared_file_path_cstr;
+    if (strncmp(shared_file_path_cstr, "/mnt/c/", 7) == 0) {
+        windows_cmd_path = "C:" + std::string(shared_file_path_cstr + 6);
+        for (char& c : windows_cmd_path) {
+            if (c == '/') c = '\\';
+        }
+    }
 
-    // Force Windows cache coherency - ensure we read fresh data from WSL2 guest
-    FlushViewOfFile(input_mapped_memory, input_buffer_size);
+    printf("[DEBUG] HandleAPIRAPI: Using temporary command file: %s\n", windows_cmd_path.c_str());
+
+    // Map temporary command file
+    void* input_mapped_memory = nullptr;
+    size_t input_buffer_size = 0;
+    HANDLE temp_cmd_file = INVALID_HANDLE_VALUE;
+    HANDLE temp_cmd_mapping = nullptr;
+
+    // Open temporary command file
+    temp_cmd_file = CreateFileA(windows_cmd_path.c_str(),
+                               GENERIC_READ,
+                               FILE_SHARE_READ,
+                               NULL,
+                               OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL,
+                               NULL);
+
+    if (temp_cmd_file == INVALID_HANDLE_VALUE) {
+        printf("[ERROR] Failed to open temporary command file: %s\n", windows_cmd_path.c_str());
+        return ERROR_FILE_NOT_FOUND;
+    }
+
+    // Get file size
+    LARGE_INTEGER file_size;
+    if (!GetFileSizeEx(temp_cmd_file, &file_size)) {
+        printf("[ERROR] Failed to get file size for: %s\n", windows_cmd_path.c_str());
+        CloseHandle(temp_cmd_file);
+        return ERROR_INVALID_DATA;
+    }
+    input_buffer_size = (size_t)file_size.QuadPart;
+
+    // Create file mapping
+    temp_cmd_mapping = CreateFileMappingA(temp_cmd_file, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (temp_cmd_mapping == NULL) {
+        printf("[ERROR] Failed to create temporary command file mapping\n");
+        CloseHandle(temp_cmd_file);
+        return ERROR_INVALID_HANDLE;
+    }
+
+    // Map the file
+    input_mapped_memory = MapViewOfFile(temp_cmd_mapping, FILE_MAP_READ, 0, 0, 0);
+    if (input_mapped_memory == NULL) {
+        printf("[ERROR] Failed to map temporary command file view\n");
+        CloseHandle(temp_cmd_mapping);
+        CloseHandle(temp_cmd_file);
+        return ERROR_INVALID_HANDLE;
+    }
+
+    printf("[DEBUG] Mapped temporary command file: size=%zu\n", input_buffer_size);
 
     if (apir_data_size > input_buffer_size) {
         printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
         return ERROR_INVALID_PARAMETER;
     }
 
-    // Find response buffer (for encoder output)
-    auto response_buffer_it = session.buffers.find(response_buffer_id);
-    if (response_buffer_it == session.buffers.end()) {
-        printf("[DEBUG] HandleAPIRAPI: Response buffer %u not found in session %u\n", response_buffer_id, session_id);
-        return ERROR_INVALID_PARAMETER;
-    }
+    void* response_mapped_memory = nullptr;
+    size_t response_buffer_size = 0;
+    HANDLE temp_response_file = INVALID_HANDLE_VALUE;
+    HANDLE temp_response_mapping = NULL;
+    bool using_temp_file = false;
 
-    BufferMapping& response_buffer_mapping = response_buffer_it->second;
-    void* response_mapped_memory = response_buffer_mapping.mapped_memory;
-    size_t response_buffer_size = response_buffer_mapping.size;
+    // Check if we should use temporary file for response
+    if (!response_file_path.empty()) {
+        using_temp_file = true;
+
+        // Convert WSL2 path to Windows path
+        std::string windows_response_path = response_file_path;
+        if (response_file_path.substr(0, 7) == "/mnt/c/") {
+            windows_response_path = "C:" + response_file_path.substr(6);
+            std::replace(windows_response_path.begin(), windows_response_path.end(), '/', '\\');
+        }
+
+        printf("[DEBUG] HandleAPIRAPI: Using temporary response file: %s\n", windows_response_path.c_str());
+
+        // Open temporary response file
+        temp_response_file = CreateFileA(
+            windows_response_path.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+
+        if (temp_response_file != INVALID_HANDLE_VALUE) {
+            // Get file size
+            LARGE_INTEGER file_size;
+            GetFileSizeEx(temp_response_file, &file_size);
+            response_buffer_size = (size_t)file_size.QuadPart;
+
+            // Create file mapping
+            temp_response_mapping = CreateFileMappingA(temp_response_file, NULL, PAGE_READWRITE, 0, 0, NULL);
+            if (temp_response_mapping != NULL) {
+                // Map the file
+                response_mapped_memory = MapViewOfFile(temp_response_mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+                if (response_mapped_memory != NULL) {
+                    printf("[DEBUG] Mapped temporary response file: size=%zu\n", response_buffer_size);
+                } else {
+                    printf("[ERROR] Failed to map temporary response file view\n");
+                    CloseHandle(temp_response_mapping);
+                    CloseHandle(temp_response_file);
+                    return ERROR_INVALID_HANDLE;
+                }
+            } else {
+                printf("[ERROR] Failed to create temporary response file mapping\n");
+                CloseHandle(temp_response_file);
+                return ERROR_INVALID_HANDLE;
+            }
+        } else {
+            printf("[ERROR] Failed to open temporary response file: %s\n", windows_response_path.c_str());
+            return ERROR_FILE_NOT_FOUND;
+        }
+    } else {
+        // Use registered shared buffer (original approach)
+        auto response_buffer_it = session.buffers.find(response_buffer_id);
+        if (response_buffer_it == session.buffers.end()) {
+            printf("[DEBUG] HandleAPIRAPI: Response buffer %u not found in session %u\n", response_buffer_id, session_id);
+            return ERROR_INVALID_PARAMETER;
+        }
+
+        BufferMapping& response_buffer_mapping = response_buffer_it->second;
+        response_mapped_memory = response_buffer_mapping.mapped_memory;
+        response_buffer_size = response_buffer_mapping.size;
+    }
 
     char* enc_cur_after = NULL;
 
@@ -1937,11 +2090,29 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         // APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...]
         // The second field (cmd_flags) contains the actual function ID
         if (apir_data_size >= sizeof(uint32_t) + sizeof(int32_t)) {
+            // Debug: Show raw bytes from temporary file
+            printf("[DEBUG] Raw APIR data from temp file (%I64u bytes): ", apir_data_size);
+            for (int i = 0; i < min(16, (int)apir_data_size); i++) {
+                printf("%02x ", ((unsigned char*)input_mapped_memory)[i]);
+            }
+            printf("\n");
+
+            uint32_t read_apir_cmd_type = *(uint32_t*)input_mapped_memory;
             function_id = *(int32_t*)((char*)input_mapped_memory + sizeof(uint32_t));
+
+            printf("[DEBUG] Read from temp file: apir_cmd_type=%u, function_id=%d\n",
+                   read_apir_cmd_type, function_id);
         } else {
             printf("[ERROR] Forward command has insufficient data size: %I64u bytes\n", apir_data_size);
             return ERROR_INVALID_PARAMETER;
         }
+    }
+
+    if (function_id == 0) {
+        printf("\n\n[ERROR] Function ID is 0, that's unexpected :/\n");
+        _exit(1);
+    } else {
+        printf("\n\n[INFO] Function ID is %d, that's nice :)\n\n\n", function_id);
     }
 
     // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
@@ -1975,9 +2146,37 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
     FlushViewOfFile(response_mapped_memory, total_response_size);
 
-    // Avoid Json::Value objects completely - return success code for manual JSON handling
-    // No cleanup needed - reusing existing buffer mapping from registration
+    // Store total_response_size for JSON response
+    g_last_response_size = total_response_size;
 
+    // Cleanup temporary file resources if used
+    if (using_temp_file) {
+        if (response_mapped_memory != NULL) {
+            UnmapViewOfFile(response_mapped_memory);
+        }
+        if (temp_response_mapping != NULL) {
+            CloseHandle(temp_response_mapping);
+        }
+        if (temp_response_file != INVALID_HANDLE_VALUE) {
+            CloseHandle(temp_response_file);
+        }
+        printf("[DEBUG] Cleaned up temporary response file resources, total_response_size=%zu\n", total_response_size);
+    }
+
+    // Cleanup temporary command file resources if used
+    if (temp_cmd_mapping != nullptr) {
+        if (input_mapped_memory != nullptr) {
+            UnmapViewOfFile(input_mapped_memory);
+        }
+        CloseHandle(temp_cmd_mapping);
+        printf("[DEBUG] Cleaned up temporary command file mapping\n");
+    }
+    if (temp_cmd_file != INVALID_HANDLE_VALUE) {
+        CloseHandle(temp_cmd_file);
+        printf("[DEBUG] Cleaned up temporary command file handle\n");
+    }
+
+    // Avoid Json::Value objects completely - return success code for manual JSON handling
     // Return special code to indicate success but avoid Json::Value serialization
     return 999;  // Custom success code for manual JSON handling
 }

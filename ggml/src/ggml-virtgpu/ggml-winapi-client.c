@@ -557,6 +557,66 @@ int ggml_winapi_send_apir_command(ggml_winapi_handle_t handle,
     return ret;
 }
 
+/* Send APIR command using temporary files */
+int ggml_winapi_send_temp_file_request(ggml_winapi_handle_t handle,
+                                      const char* cmd_file_path,
+                                      const char* reply_file_path,
+                                      size_t cmd_data_size,
+                                      size_t* actual_response_size) {
+    if (!handle || !cmd_file_path || !reply_file_path || !actual_response_size) {
+        return GGML_WINAPI_ERROR_INVALID_PARAMS;
+    }
+
+    ggml_winapi_context_t* ctx = (ggml_winapi_context_t*)handle;
+
+    /* Create JSON request with temporary file paths */
+    char json_string[2048];
+    snprintf(json_string, sizeof(json_string),
+             "{"
+             "\"api\":\"apir\","
+             "\"request_id\":1,"
+             "\"apir_cmd_type\":2,"  // APIR_COMMAND_TYPE_FORWARD
+             "\"apir_data_size\":%zu,"
+             "\"shared_file_path\":\"%s\","
+             "\"response_file_path\":\"%s\","
+             "\"buffer_id\":1,"
+             "\"response_buffer_id\":2"
+             "}",
+             cmd_data_size, cmd_file_path, reply_file_path);
+
+    /* Send request via socket */
+    int ret = winapi_send_json_message(ctx->socket_fd, json_string);
+    if (ret != 0) {
+        fprintf(stderr, "ggml-winapi: Failed to send temp file request\n");
+        return GGML_WINAPI_ERROR_SEND_FAILED;
+    }
+
+    /* Receive response */
+    char response_json[4096];
+    int response_len = winapi_receive_response(ctx->socket_fd, response_json, sizeof(response_json));
+    if (response_len <= 0) {
+        fprintf(stderr, "ggml-winapi: Failed to receive temp file response\n");
+        return GGML_WINAPI_ERROR_SEND_FAILED;
+    }
+
+    /* Parse response to get actual response size */
+    char* response_size_ptr = strstr(response_json, "\"response_size\":");
+    if (response_size_ptr) {
+        response_size_ptr += 16; /* skip "response_size": */
+        *actual_response_size = strtoull(response_size_ptr, NULL, 10);
+    } else {
+        *actual_response_size = 0;
+    }
+
+    /* Check for success status */
+    if (strstr(response_json, "\"status\":\"success\"") != NULL) {
+        return GGML_WINAPI_OK;
+    } else {
+        fprintf(stderr, "ggml-winapi: Temp file request failed: %s\n", response_json);
+        return GGML_WINAPI_ERROR_SEND_FAILED;
+    }
+}
+
 /* Test connectivity */
 int ggml_winapi_echo(ggml_winapi_handle_t handle,
                     const char *input,

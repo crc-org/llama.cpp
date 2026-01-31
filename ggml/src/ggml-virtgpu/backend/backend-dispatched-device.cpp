@@ -12,8 +12,9 @@ uint32_t backend_device_get_device_count(apir_encoder * enc, apir_decoder * dec,
     GGML_UNUSED(dec);
 
     int32_t dev_count = reg->iface.get_device_count(reg);
+    printf("%s ==> %d <== \n\n\n\nUNEXPECTED CALL. Exiting :/\n", __func__, dev_count);
     apir_encode_int32_t(enc, &dev_count);
-
+    _exit(1);
     return 0;
 }
 
@@ -27,7 +28,8 @@ uint32_t backend_device_get_count(apir_encoder * enc, apir_decoder * dec, virgl_
     }
 
     int32_t dev_count = reg->iface.get_device_count(reg);
-    printf("==> %d <==\n", dev_count);
+    printf("%s ==> %d <==\n", __func__, dev_count);
+
     apir_encode_int32_t(enc, &dev_count);
 
     return 0;
@@ -38,7 +40,7 @@ uint32_t backend_device_get_name(apir_encoder * enc, apir_decoder * dec, virgl_a
     GGML_UNUSED(dec);
 
     const char * string = dev->iface.get_name(dev);
-    printf("==> %s <==\n", string);
+    printf("%s ==> %s <==\n", __func__, string);
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);
     apir_encode_char_array(enc, string, string_size);
@@ -51,7 +53,7 @@ uint32_t backend_device_get_description(apir_encoder * enc, apir_decoder * dec, 
     GGML_UNUSED(dec);
 
     const char * string = dev->iface.get_description(dev);
-    printf("==> %s <==\n", string);
+    printf("%s ==> %s <==\n", __func__, string);
     const size_t string_size = strlen(string) + 1;
     apir_encode_array_size(enc, string_size);
     apir_encode_char_array(enc, string, string_size);

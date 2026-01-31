@@ -30,7 +30,8 @@ static virtgpu * apir_initialize() {
 
         gpu = create_virtgpu();
         if (!gpu) {
-            GGML_ABORT("failed to initialize the virtgpu");
+            printf("failed to initialize the virtgpu\n");
+            _exit(1);
         }
 
         printf("\n[VIRTGPU] Populating the cache values\n");
