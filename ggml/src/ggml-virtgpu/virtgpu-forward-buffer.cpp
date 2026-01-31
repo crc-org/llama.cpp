@@ -51,6 +51,12 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
     }
 
     memcpy(shmem->mmap_ptr, data, size);
+
+    // Cache coherency: flush guest writes so host can see them
+    if (msync(shmem->mmap_ptr, size, MS_SYNC) != 0) {
+        printf("msync failed: %s\n", strerror(errno));
+    }
+
     apir_encode_virtgpu_shmem_res_id(encoder, shmem->res_id);
 
     apir_encode_size_t(encoder, &offset);
@@ -106,6 +112,11 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
     apir_encode_size_t(encoder, &size);
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
+
+    // Cache coherency: invalidate guest cache so it can see host writes
+    if (msync(shmem->mmap_ptr, size, MS_INVALIDATE) != 0) {
+        printf("msync failed: %s\n", strerror(errno));
+    }
 
     memcpy(data, shmem->mmap_ptr, size);
 
