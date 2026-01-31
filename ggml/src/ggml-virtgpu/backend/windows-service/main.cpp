@@ -2098,13 +2098,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         &enc_cur_after                     // Output position after encoding
     );
 
-    // Prepend APIR return code to response (Windows-specific APIR protocol layer)
-    size_t backend_data_size = enc_cur_after - (char*)response_mapped_memory;
-    memmove((char*)response_mapped_memory + sizeof(uint32_t), response_mapped_memory, backend_data_size);
-
-    *(uint32_t*)response_mapped_memory = dispatch_result;
-    enc_cur_after += sizeof(uint32_t);
-
     // Force Windows cache coherency - ensure WSL2 guest sees fresh response data
     size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;
     FlushViewOfFile(response_mapped_memory, total_response_size);

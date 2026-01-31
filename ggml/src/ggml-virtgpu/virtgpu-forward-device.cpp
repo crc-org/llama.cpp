@@ -27,10 +27,6 @@ int apir_device_get_count(virtgpu * gpu) {
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_COUNT);
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    /* Skip Windows service status code (first uint32_t) before reading APIR data */
-    uint32_t service_status;
-    apir_decode_uint32_t(decoder, &service_status);
-
     apir_decode_int32_t(decoder, &dev_count);
     printf("==> %d\n", dev_count);
     remote_call_finish(gpu, encoder, decoder);
@@ -53,10 +49,6 @@ char * apir_device_get_name(virtgpu * gpu) {
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_NAME);
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    /* Skip Windows service status code (first uint32_t) before reading APIR data */
-    uint32_t service_status;
-    apir_decode_uint32_t(decoder, &service_status);
-
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
     char            * string = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
     if (!string) {
@@ -78,10 +70,6 @@ char * apir_device_get_description(virtgpu * gpu) {
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_DESCRIPTION);
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
-
-    /* Skip Windows service status code (first uint32_t) before reading APIR data */
-    uint32_t service_status;
-    apir_decode_uint32_t(decoder, &service_status);
 
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
 #if CHECK_CONSISTENCY == 1
