@@ -1,5 +1,6 @@
 #ifdef GGML_VIRTGPU_USE_WINDOWS
 #include "virtgpu-interface.h"
+#include "ggml-winapi-client.h"  // For ggml_winapi_shared_buffer_t
 #include <threads.h>  // For mtx_t, mtx_lock, mtx_unlock
 #else
 #include "virtgpu.h"
@@ -13,12 +14,23 @@
 #include "../ggml-backend-impl.h"
 
 #include <sys/mman.h>  // For madvise and MADV_DONTNEED
+#include <fcntl.h>     // For open()
+#include <unistd.h>    // For fsync(), close()
 
 /* Inline cache coherency sync method - call before remote operations */
 static inline void virtgpu_sync_buffers(virtgpu* gpu) {
-    printf("[FRONTEND_SYNC] Invalidating reply buffer cache before remote call\n");
-    fflush(stdout);
+    /* Linux: Use madvise for cache invalidation */
     madvise(gpu->reply_shmem.mmap_ptr, gpu->reply_shmem.mmap_size, MADV_DONTNEED);
+
+    /* Windows: Use existing file descriptor to sync the reply buffer */
+    typedef struct {
+        ggml_winapi_shared_buffer_t buffer;
+    } virtgpu_windows_shmem_data;
+
+    virtgpu_windows_shmem_data* shmem_data = (virtgpu_windows_shmem_data*)gpu->reply_shmem.backend_data;
+    if (shmem_data && shmem_data->buffer.fd >= 0) {
+        fsync(shmem_data->buffer.fd);
+    }
 }
 
 /* Function name mapping for client-side logging */
