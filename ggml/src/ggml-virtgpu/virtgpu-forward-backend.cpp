@@ -1,5 +1,10 @@
 #include "virtgpu-forward-impl.h"
 #include <unordered_set>
+#include <unordered_map>
+
+// Simple logging control for graph compute messages
+#define GRAPH_COMPUTE_DEBUG 0
+#define GRAPH_LOG(...) do { if (GRAPH_COMPUTE_DEBUG) printf(__VA_ARGS__); } while(0)
 
 static long long current_time_ms() {
     timespec ts;
@@ -14,7 +19,7 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     // Step 1: Find all unique buffer contexts involved in the graph
     std::unordered_set<apir_buffer_context_t *> buffer_contexts;
-    for (uint32_t i = 0; i < cgraph->n_nodes; i++) {
+    for (uint32_t i = 0; i < (uint32_t)cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
         if (node->buffer) {
             apir_buffer_context_t * ctx = BUFFER_TO_APIR_CONTEXT(node->buffer);
@@ -33,18 +38,47 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
         }
     }
 
-    // Step 2: Flush buffer data to ensure cache coherency
-    // For now, we'll use msync to flush writes without unmapping
-    // TODO: Implement unmap/remap strategy once we understand the Windows buffer system better
+    // Step 2: Store original mapping info and unmap buffers
+    struct buffer_mapping_info {
+        void * original_ptr;
+        size_t size;
+        uint32_t res_id;
+        int fd;  // File descriptor for remapping
+    };
+    std::unordered_map<apir_buffer_context_t *, buffer_mapping_info> original_mappings;
 
     for (apir_buffer_context_t * ctx : buffer_contexts) {
         if (ctx && ctx->shmem.mmap_ptr) {
-            printf("[GRAPH_COMPUTE] Flushing buffer %p (size=%zu)\n",
-                   ctx->shmem.mmap_ptr, ctx->shmem.mmap_size);
+            buffer_mapping_info info;
+            info.original_ptr = ctx->shmem.mmap_ptr;
+            info.size = ctx->shmem.mmap_size;
+            info.res_id = ctx->shmem.res_id;
 
-            // Flush writes to ensure host sees them
-            if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_SYNC) != 0) {
-                printf("msync failed for buffer: %s\n", strerror(errno));
+            // For Windows: get fd from the winapi shared buffer in backend_data
+            if (ctx->shmem.backend_data) {
+                ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
+                info.fd = winapi_buf->fd;
+            } else {
+                printf("Warning: Windows buffer has no backend_data, skipping unmap\n");
+                continue;
+            }
+
+            original_mappings[ctx] = info;
+
+            GRAPH_LOG("[GRAPH_COMPUTE] Unmapping buffer %p (size=%zu, res_id=%u, fd=%d)\n",
+                       info.original_ptr, info.size, info.res_id, info.fd);
+
+            // Flush writes before unmapping to ensure host sees them
+            if (msync(info.original_ptr, info.size, MS_SYNC) != 0) {
+                printf("msync MS_SYNC failed for buffer: %s\n", strerror(errno));
+            }
+
+            // Unmap the buffer
+            if (munmap(info.original_ptr, info.size) != 0) {
+                printf("munmap failed for buffer %p: %s\n", info.original_ptr, strerror(errno));
+            } else {
+                ctx->shmem.mmap_ptr = NULL; // Mark as unmapped
+                GRAPH_LOG("[GRAPH_COMPUTE] Successfully unmapped buffer %p\n", info.original_ptr);
             }
         }
     }
@@ -85,14 +119,47 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     remote_call_finish(gpu, encoder, decoder);
 
-    // Step 4: Post-compute invalidation to see host changes
-    // Invalidate guest cache to see any host writes to the buffers
-    for (apir_buffer_context_t * ctx : buffer_contexts) {
-        if (ctx && ctx->shmem.mmap_ptr) {
-            printf("[GRAPH_COMPUTE] Invalidating buffer %p cache\n", ctx->shmem.mmap_ptr);
+    // Step 4: Remap all unmapped buffers back to their original addresses
+    for (auto & pair : original_mappings) {
+        apir_buffer_context_t * ctx = pair.first;
+        buffer_mapping_info & info = pair.second;
 
-            if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_INVALIDATE) != 0) {
-                printf("msync MS_INVALIDATE failed for buffer: %s\n", strerror(errno));
+        if (ctx && ctx->shmem.mmap_ptr == NULL) { // Was unmapped
+            GRAPH_LOG("[GRAPH_COMPUTE] Remapping buffer at %p (size=%zu, res_id=%u, fd=%d)\n",
+                       info.original_ptr, info.size, info.res_id, info.fd);
+
+            void * remapped = NULL;
+
+            // Try to remap at the original address using the stored fd
+            // For temporary files, offset should be 0
+            uint64_t offset = 0;
+            remapped = mmap(info.original_ptr, info.size, PROT_READ | PROT_WRITE,
+                           MAP_SHARED | MAP_FIXED, info.fd, offset);
+
+            if (remapped == MAP_FAILED || remapped != info.original_ptr) {
+                printf("Failed to remap buffer at original address %p: %s\n",
+                       info.original_ptr, strerror(errno));
+
+                // Fallback: Try without MAP_FIXED (let system choose address)
+                remapped = mmap(NULL, info.size, PROT_READ | PROT_WRITE,
+                               MAP_SHARED, info.fd, offset);
+
+                if (remapped == MAP_FAILED) {
+                    printf("FATAL: Failed to remap buffer: %s\n", strerror(errno));
+                    exit(1);
+                }
+
+                if (remapped != info.original_ptr) {
+                    printf("Buffer remapped to new address %p (was %p)\n", remapped, info.original_ptr);
+                }
+            }
+
+            ctx->shmem.mmap_ptr = remapped;
+            GRAPH_LOG("[GRAPH_COMPUTE] Successfully remapped buffer to %p\n", remapped);
+
+            // Invalidate cache to see any host changes
+            if (msync(remapped, info.size, MS_INVALIDATE) != 0) {
+                printf("msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
             }
         }
     }
