@@ -17,7 +17,7 @@
 #include <fcntl.h>     // For open()
 #include <unistd.h>    // For fsync(), close()
 
-/* Inline cache coherency sync method - call before remote operations */
+/* Inline cache coherency sync method - call before remote operations. */
 static inline void virtgpu_sync_buffers(virtgpu* gpu) {
     /* Linux: Use madvise for cache invalidation */
     madvise(gpu->reply_shmem.mmap_ptr, gpu->reply_shmem.mmap_size, MADV_DONTNEED);
