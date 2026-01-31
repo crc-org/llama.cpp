@@ -25,6 +25,36 @@
 #include <sys/socket.h> // For send(), recv()
 #include <netinet/in.h> // For ntohl(), htonl()
 
+/* Function name mapping for client-side logging */
+const char * frontend_command_name(int cmd_type) {
+    switch (cmd_type) {
+        case 0: return "backend_device_get_device_count";
+        case 1: return "backend_device_get_count";
+        case 2: return "backend_device_get_name";
+        case 3: return "backend_device_get_description";
+        case 4: return "backend_device_get_type";
+        case 5: return "backend_device_get_memory";
+        case 6: return "backend_device_supports_op";
+        case 7: return "backend_device_get_buffer_type";
+        case 8: return "backend_device_get_props";
+        case 9: return "backend_device_buffer_from_ptr";
+        case 10: return "backend_buffer_type_get_name";
+        case 11: return "backend_buffer_type_get_alignment";
+        case 12: return "backend_buffer_type_get_max_size";
+        case 13: return "backend_buffer_type_is_host";
+        case 14: return "backend_buffer_type_alloc_buffer";
+        case 15: return "backend_buffer_type_get_alloc_size";
+        case 16: return "backend_buffer_get_base";
+        case 17: return "backend_buffer_set_tensor";
+        case 18: return "backend_buffer_get_tensor";
+        case 19: return "backend_buffer_cpy_tensor";
+        case 20: return "backend_buffer_clear";
+        case 21: return "backend_buffer_free_buffer";
+        case 22: return "backend_backend_graph_compute";
+        default: return "UNKNOWN";
+    }
+}
+
 /* Temporary file management for per-request communication */
 typedef struct {
     char file_path[256];
@@ -380,6 +410,10 @@ static struct apir_encoder* windows_remote_call_prepare(virtgpu* gpu, int apir_c
         printf("[CLIENT] ERROR: Invalid virtgpu handle in remote_call_prepare\n");
         return NULL;
     }
+
+    /* Log frontend dispatcher call */
+    const char * method_name = frontend_command_name(cmd_flags);
+    printf("[FRONTEND_DISPATCHER] Calling method: %s (cmd_type=%d)\n", method_name, cmd_flags);
 
     virtgpu_windows_data* win_data = (virtgpu_windows_data*)gpu->backend_data;
 
