@@ -20,6 +20,11 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     static bool async_backend_initialized = false;
     static bool async_backend;
+    static uint32_t host_graph_compute_counter = 0;
+
+    host_graph_compute_counter++;
+
+    printf("[DEBUG] HOST #%u: === backend_backend_graph_compute ENTRY ===\n", host_graph_compute_counter);
 
     if (!async_backend_initialized) {
         ggml_backend_dev_props props;
@@ -44,6 +49,16 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     apir_decoder secondary_dec = apir_new_decoder((const char *) shmem_data, cgraph_size);
 
     ggml_cgraph * cgraph = apir_decode_ggml_cgraph(&secondary_dec, cgraph_size);
+
+    printf("[DEBUG] HOST #%u: Decoded cgraph with %d nodes\n",
+           host_graph_compute_counter, cgraph ? cgraph->n_nodes : -1);
+
+    // SAFETY CHECK: If there are 0 nodes, something went wrong in transmission/serialization
+    if (!cgraph || cgraph->n_nodes == 0) {
+        printf("ERROR: HOST #%u: Received cgraph with 0 nodes - transmission/serialization failed\n",
+               host_graph_compute_counter);
+        return 1;
+    }
 
     // Extract unique buffer handles from decoded graph tensors for cache coherency
     std::unordered_set<uint64_t> buffer_handles_set;
@@ -74,6 +89,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     // Convert to array for passing to C functions
     std::vector<uint64_t> buffer_handles(buffer_handles_set.begin(), buffer_handles_set.end());
+
+    printf("[DEBUG] HOST #%u: Extracted %zu unique buffer handles\n",
+           host_graph_compute_counter, buffer_handles.size());
 
     ggml_status status;
 #if APIR_BACKEND_CHECK_SUPPORTS_OP == 1

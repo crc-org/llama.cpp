@@ -543,7 +543,7 @@ static uint32_t windows_remote_call(virtgpu* gpu, struct apir_encoder* enc, stru
                                 printf("[REMOTE_CALL] Backend returned error code %u, aborting\n", backend_return_code);
                                 apir_decoder_deinit(*dec);
                                 *dec = NULL;
-                                result = APIR_FORWARD_HYPERCALL_ERROR;
+                                _exit(1);
                             } else {
                                 /* Skip the return code so decoder is positioned at actual data */
                                 apir_decode_uint32_t(*dec, &backend_return_code);
