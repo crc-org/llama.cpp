@@ -80,6 +80,12 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
                 ctx->shmem.mmap_ptr = NULL; // Mark as unmapped
                 GRAPH_LOG("[GRAPH_COMPUTE] Successfully unmapped buffer %p\n", info.original_ptr);
             }
+
+            // CACHE COHERENCY: Close FD to flush WSL2 filesystem cache
+            if (info.fd >= 0) {
+                close(info.fd);
+                GRAPH_LOG("[GRAPH_COMPUTE] Closed FD %d for buffer %p to flush cache\n", info.fd, info.original_ptr);
+            }
         }
     }
 
@@ -125,16 +131,32 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
         buffer_mapping_info & info = pair.second;
 
         if (ctx && ctx->shmem.mmap_ptr == NULL) { // Was unmapped
-            GRAPH_LOG("[GRAPH_COMPUTE] Remapping buffer at %p (size=%zu, res_id=%u, fd=%d)\n",
-                       info.original_ptr, info.size, info.res_id, info.fd);
+            GRAPH_LOG("[GRAPH_COMPUTE] Remapping buffer at %p (size=%zu, res_id=%u)\n",
+                       info.original_ptr, info.size, info.res_id);
 
             void * remapped = NULL;
 
-            // Try to remap at the original address using the stored fd
+            // CACHE COHERENCY: Reopen file with fresh FD to see host changes
+            int fresh_fd = -1;
+            if (ctx->shmem.backend_data) {
+                ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)ctx->shmem.backend_data;
+                fresh_fd = open(winapi_buf->file_path, O_RDWR);
+                if (fresh_fd < 0) {
+                    printf("FATAL: Failed to reopen file %s: %s\n", winapi_buf->file_path, strerror(errno));
+                    exit(1);
+                }
+                winapi_buf->fd = fresh_fd; // Update the fd in the buffer struct
+                GRAPH_LOG("[GRAPH_COMPUTE] Reopened file %s with fresh FD %d\n", winapi_buf->file_path, fresh_fd);
+            } else {
+                printf("FATAL: No backend_data for buffer remapping\n");
+                exit(1);
+            }
+
+            // Try to remap at the original address using the fresh fd
             // For temporary files, offset should be 0
             uint64_t offset = 0;
             remapped = mmap(info.original_ptr, info.size, PROT_READ | PROT_WRITE,
-                           MAP_SHARED | MAP_FIXED, info.fd, offset);
+                           MAP_SHARED | MAP_FIXED, fresh_fd, offset);
 
             if (remapped == MAP_FAILED || remapped != info.original_ptr) {
                 printf("Failed to remap buffer at original address %p: %s\n",
@@ -142,7 +164,7 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
                 // Fallback: Try without MAP_FIXED (let system choose address)
                 remapped = mmap(NULL, info.size, PROT_READ | PROT_WRITE,
-                               MAP_SHARED, info.fd, offset);
+                               MAP_SHARED, fresh_fd, offset);
 
                 if (remapped == MAP_FAILED) {
                     printf("FATAL: Failed to remap buffer: %s\n", strerror(errno));
@@ -157,7 +179,7 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
             ctx->shmem.mmap_ptr = remapped;
             GRAPH_LOG("[GRAPH_COMPUTE] Successfully remapped buffer to %p\n", remapped);
 
-            // Invalidate cache to see any host changes
+            // CACHE COHERENCY: Invalidate cache to see host changes
             if (msync(remapped, info.size, MS_INVALIDATE) != 0) {
                 printf("msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
             }
