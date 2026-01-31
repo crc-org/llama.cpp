@@ -1,23 +1,53 @@
 #include "virtgpu-forward-impl.h"
 
-// CACHE COHERENCY: Helper functions for guest/host FD coordination
-static int close_buffer_fd_for_host_operation(apir_buffer_context_t * buffer_context) {
+// CACHE COHERENCY: Helper functions for guest/host coordination (FD + memory mapping)
+typedef struct {
+    int original_fd;
+    void * original_ptr;
+    size_t size;
+} buffer_cache_coherency_info;
+
+static buffer_cache_coherency_info unmap_buffer_for_host_operation(apir_buffer_context_t * buffer_context) {
+    buffer_cache_coherency_info info = {-1, NULL, 0};
+
     if (!buffer_context->shmem.backend_data) {
-        return -1; // No backend data available
+        return info; // No backend data available
     }
 
     ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)buffer_context->shmem.backend_data;
+
+    // Store original mapping info
+    info.original_ptr = buffer_context->shmem.mmap_ptr;
+    info.size = buffer_context->shmem.mmap_size;
+
+    // Flush writes before unmapping to ensure host sees them
+    if (info.original_ptr && info.size > 0) {
+        if (msync(info.original_ptr, info.size, MS_SYNC) != 0) {
+            printf("FATAL: msync MS_SYNC failed: %s\n", strerror(errno));
+            exit(1);
+        }
+
+        // Unmap the buffer
+        if (munmap(info.original_ptr, info.size) != 0) {
+            printf("FATAL: munmap failed: %s\n", strerror(errno));
+            exit(1);
+        }
+        buffer_context->shmem.mmap_ptr = NULL; // Mark as unmapped
+    }
+
+    // Close FD for WSL2/Windows filesystem cache coherency
     if (winapi_buf->fd >= 0) {
-        int original_fd = winapi_buf->fd;
+        info.original_fd = winapi_buf->fd;
         close(winapi_buf->fd);
         winapi_buf->fd = -1;
-        return original_fd;
     }
-    return -1;
+
+    return info;
 }
 
-static void reopen_buffer_fd_after_host_operation(apir_buffer_context_t * buffer_context, int original_fd) {
-    if (!buffer_context->shmem.backend_data || original_fd < 0) {
+static void remap_buffer_after_host_operation(apir_buffer_context_t * buffer_context,
+                                             const buffer_cache_coherency_info * info) {
+    if (!buffer_context->shmem.backend_data || info->original_fd < 0) {
         return; // Nothing to reopen
     }
 
@@ -25,17 +55,29 @@ static void reopen_buffer_fd_after_host_operation(apir_buffer_context_t * buffer
 
     // Reopen file with fresh FD to see host changes
     int fresh_fd = open(winapi_buf->file_path, O_RDWR);
-    if (fresh_fd >= 0) {
-        winapi_buf->fd = fresh_fd;
+    if (fresh_fd < 0) {
+        printf("FATAL: Failed to reopen file after host operation: %s\n", strerror(errno));
+        exit(1);
+    }
+    winapi_buf->fd = fresh_fd;
 
-        // Invalidate cache to see host changes
-        if (buffer_context->shmem.mmap_ptr) {
-            if (msync(buffer_context->shmem.mmap_ptr, buffer_context->shmem.mmap_size, MS_INVALIDATE) != 0) {
-                printf("Warning: msync MS_INVALIDATE failed: %s\n", strerror(errno));
-            }
-        }
-    } else {
-        printf("Warning: Failed to reopen file after host operation: %s\n", strerror(errno));
+    // Remap at original address with fresh FD - MUST succeed at same address
+    void * remapped = mmap(info->original_ptr, info->size, PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_FIXED, fresh_fd, 0);
+
+    if (remapped == MAP_FAILED || remapped != info->original_ptr) {
+        printf("FATAL: Failed to remap buffer at original address %p: %s\n",
+               info->original_ptr, strerror(errno));
+        printf("FATAL: Buffer MUST be mapped at exact same address or tensors will be invalid\n");
+        exit(1);
+    }
+
+    buffer_context->shmem.mmap_ptr = remapped;
+
+    // Invalidate cache to see host changes
+    if (msync(remapped, info->size, MS_INVALIDATE) != 0) {
+        printf("FATAL: msync MS_INVALIDATE failed: %s\n", strerror(errno));
+        exit(1);
     }
 }
 
@@ -177,8 +219,8 @@ bool apir_buffer_cpy_tensor(virtgpu *               gpu,
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
 
-    // CACHE COHERENCY: Close guest FD before host copies to dst buffer
-    int original_fd = close_buffer_fd_for_host_operation(buffer_context);
+    // CACHE COHERENCY: Unmap buffer and close FD before host copies to dst buffer
+    buffer_cache_coherency_info info = unmap_buffer_for_host_operation(buffer_context);
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_CPY_TENSOR);
 
@@ -193,8 +235,8 @@ bool apir_buffer_cpy_tensor(virtgpu *               gpu,
 
     remote_call_finish(gpu, encoder, decoder);
 
-    // CACHE COHERENCY: Reopen fresh FD and invalidate cache to see host changes
-    reopen_buffer_fd_after_host_operation(buffer_context, original_fd);
+    // CACHE COHERENCY: Remap buffer with fresh FD to see host changes
+    remap_buffer_after_host_operation(buffer_context, &info);
 
     return ret_val;
 }
@@ -204,8 +246,8 @@ void apir_buffer_clear(virtgpu * gpu, apir_buffer_context_t * buffer_context, ui
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
 
-    // CACHE COHERENCY: Close guest FD before host clears buffer
-    int original_fd = close_buffer_fd_for_host_operation(buffer_context);
+    // CACHE COHERENCY: Unmap buffer and close FD before host clears buffer
+    buffer_cache_coherency_info info = unmap_buffer_for_host_operation(buffer_context);
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_CLEAR);
 
@@ -216,8 +258,8 @@ void apir_buffer_clear(virtgpu * gpu, apir_buffer_context_t * buffer_context, ui
 
     remote_call_finish(gpu, encoder, decoder);
 
-    // CACHE COHERENCY: Reopen fresh FD and invalidate cache to see host changes
-    reopen_buffer_fd_after_host_operation(buffer_context, original_fd);
+    // CACHE COHERENCY: Remap buffer with fresh FD to see host changes
+    remap_buffer_after_host_operation(buffer_context, &info);
 }
 
 void apir_buffer_free_buffer(virtgpu * gpu, apir_buffer_context_t * buffer_context) {

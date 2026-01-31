@@ -39,7 +39,8 @@ static void reopen_graph_buffer_fds_after_host(const std::unordered_map<apir_buf
                 // Invalidate cache to see host changes
                 if (ctx->shmem.mmap_ptr) {
                     if (msync(ctx->shmem.mmap_ptr, ctx->shmem.mmap_size, MS_INVALIDATE) != 0) {
-                        printf("msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
+                        printf("FATAL: msync MS_INVALIDATE failed after remap: %s\n", strerror(errno));
+                        exit(1);
                     }
                 }
             } else {
@@ -108,16 +109,17 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
             // Flush writes before unmapping to ensure host sees them
             if (msync(info.original_ptr, info.size, MS_SYNC) != 0) {
-                printf("msync MS_SYNC failed for buffer: %s\n", strerror(errno));
+                printf("FATAL: msync MS_SYNC failed for buffer: %s\n", strerror(errno));
+                exit(1);
             }
 
             // Unmap the buffer
             if (munmap(info.original_ptr, info.size) != 0) {
-                printf("munmap failed for buffer %p: %s\n", info.original_ptr, strerror(errno));
-            } else {
-                ctx->shmem.mmap_ptr = NULL; // Mark as unmapped
-                GRAPH_LOG("[GRAPH_COMPUTE] Successfully unmapped buffer %p\n", info.original_ptr);
+                printf("FATAL: munmap failed for buffer %p: %s\n", info.original_ptr, strerror(errno));
+                exit(1);
             }
+            ctx->shmem.mmap_ptr = NULL; // Mark as unmapped
+            GRAPH_LOG("[GRAPH_COMPUTE] Successfully unmapped buffer %p\n", info.original_ptr);
         }
     }
 
@@ -181,28 +183,16 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
                 exit(1);
             }
 
-            // Try to remap at the original address using the fresh fd
-            // For temporary files, offset should be 0
+            // Remap at original address using fresh FD - MUST succeed at same address
             uint64_t offset = 0;
             remapped = mmap(info.original_ptr, info.size, PROT_READ | PROT_WRITE,
                            MAP_SHARED | MAP_FIXED, fresh_fd, offset);
 
             if (remapped == MAP_FAILED || remapped != info.original_ptr) {
-                printf("Failed to remap buffer at original address %p: %s\n",
+                printf("FATAL: Failed to remap buffer at original address %p: %s\n",
                        info.original_ptr, strerror(errno));
-
-                // Fallback: Try without MAP_FIXED (let system choose address)
-                remapped = mmap(NULL, info.size, PROT_READ | PROT_WRITE,
-                               MAP_SHARED, fresh_fd, offset);
-
-                if (remapped == MAP_FAILED) {
-                    printf("FATAL: Failed to remap buffer: %s\n", strerror(errno));
-                    exit(1);
-                }
-
-                if (remapped != info.original_ptr) {
-                    printf("Buffer remapped to new address %p (was %p)\n", remapped, info.original_ptr);
-                }
+                printf("FATAL: Buffer MUST be mapped at exact same address or tensors will be invalid\n");
+                exit(1);
             }
 
             ctx->shmem.mmap_ptr = remapped;
