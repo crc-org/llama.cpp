@@ -2019,9 +2019,9 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
         if (temp_response_file != INVALID_HANDLE_VALUE) {
             // Get file size
-            LARGE_INTEGER file_size;
-            GetFileSizeEx(temp_response_file, &file_size);
-            response_buffer_size = (size_t)file_size.QuadPart;
+            LARGE_INTEGER response_file_size;
+            GetFileSizeEx(temp_response_file, &response_file_size);
+            response_buffer_size = (size_t)response_file_size.QuadPart;
 
             // Create file mapping
             temp_response_mapping = CreateFileMappingA(temp_response_file, NULL, PAGE_READWRITE, 0, 0, NULL);
@@ -2214,8 +2214,8 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
     }
 
     // Get file size
-    LARGE_INTEGER file_size;
-    if (!GetFileSizeEx(file_handle, &file_size)) {
+    LARGE_INTEGER existing_file_size;
+    if (!GetFileSizeEx(file_handle, &existing_file_size)) {
         CloseHandle(file_handle);
         printf("[ERROR] Failed to get file size for: %s\n", windows_path.c_str());
         return ERROR_INVALID_DATA;
@@ -2237,28 +2237,16 @@ DWORD HandleBufferRegistrationAPI(SOCKET client_socket, UINT32 request_id, UINT3
         return ERROR_NOT_ENOUGH_MEMORY;
     }
 
-    // Map the file into memory
-    void* mapped_memory = MapViewOfFile(
-        mapping_handle,
-        FILE_MAP_ALL_ACCESS,
-        0,
-        0,
-        0
-    );
+    // CACHE COHERENCY: Don't map the file into memory immediately
+    // We'll defer mapping until backend_graph_compute to ensure cache coherency
+    void* mapped_memory = NULL;  // Deferred mapping
 
-    if (mapped_memory == NULL) {
-        CloseHandle(mapping_handle);
-        CloseHandle(file_handle);
-        printf("[ERROR] Failed to map view of file: %s\n", windows_path.c_str());
-        return ERROR_NOT_ENOUGH_MEMORY;
-    }
-
-    // Store buffer mapping
+    // Store buffer mapping (with NULL mapped_memory for now)
     BufferMapping mapping;
     mapping.file_handle = file_handle;
     mapping.mapping_handle = mapping_handle;
-    mapping.mapped_memory = mapped_memory;
-    mapping.size = (size_t)file_size.QuadPart;
+    mapping.mapped_memory = mapped_memory;  // NULL - will be mapped on-demand
+    mapping.size = (size_t)existing_file_size.QuadPart;
     mapping.file_path = file_path;
 
     session.buffers[buffer_id] = mapping;
