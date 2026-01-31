@@ -203,12 +203,90 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
         return NULL;
     }
 
-    void* ptr = buffer_it->second.mapped_memory;
-    if (ptr == NULL) {
-        printf("[ERROR] Buffer %u has NULL mapping in session %u\n", res_id, session_id);
+    auto& mapping = buffer_it->second;
+
+    // CACHE COHERENCY: Map on-demand if not already mapped
+    if (mapping.mapped_memory == NULL) {
+        printf("[BACKEND] On-demand mapping buffer %u for session %u\n", res_id, session_id);
+
+        mapping.mapped_memory = MapViewOfFile(
+            mapping.mapping_handle,
+            FILE_MAP_ALL_ACCESS,
+            0,
+            0,
+            0
+        );
+
+        if (mapping.mapped_memory == NULL) {
+            printf("[ERROR] Failed to map buffer %u on-demand: GetLastError=%lu\n",
+                   res_id, GetLastError());
+            return NULL;
+        }
     }
 
-    return ptr;
+    return mapping.mapped_memory;
+}
+
+// CACHE COHERENCY: Helper function to unmap all buffers for a session
+extern "C" void unmap_all_session_buffers(uint32_t session_id) {
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    auto session_it = g_client_sessions.find(session_id);
+    if (session_it == g_client_sessions.end()) {
+        return; // No session found
+    }
+
+    auto& session = session_it->second;
+    printf("[BACKEND] Unmapping %zu buffers for session %u (cache coherency)\n",
+           session.buffers.size(), session_id);
+
+    // Unmap all currently mapped buffers
+    for (auto& [buffer_id, mapping] : session.buffers) {
+        if (mapping.mapped_memory != NULL) {
+            printf("[BACKEND] Unmapping buffer %u (ptr=%p)\n", buffer_id, mapping.mapped_memory);
+
+            if (!UnmapViewOfFile(mapping.mapped_memory)) {
+                printf("[ERROR] Failed to unmap buffer %u: GetLastError=%lu\n",
+                       buffer_id, GetLastError());
+            }
+
+            mapping.mapped_memory = NULL;  // Mark as unmapped for on-demand remapping
+        }
+    }
+
+    printf("[BACKEND] All session buffers unmapped for cache coherency\n");
+}
+
+// CACHE COHERENCY: Helper function to ensure all buffers are mapped for operations
+extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id) {
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    auto session_it = g_client_sessions.find(session_id);
+    if (session_it == g_client_sessions.end()) {
+        return; // No session found
+    }
+
+    auto& session = session_it->second;
+
+    // Ensure all buffers in the session are mapped
+    for (auto& [buffer_id, mapping] : session.buffers) {
+        if (mapping.mapped_memory == NULL) {
+            printf("[BACKEND] Mapping buffer %u for operation\n", buffer_id);
+
+            mapping.mapped_memory = MapViewOfFile(
+                mapping.mapping_handle,
+                FILE_MAP_ALL_ACCESS,
+                0,
+                0,
+                0
+            );
+
+            if (mapping.mapped_memory == NULL) {
+                printf("[ERROR] Failed to map buffer %u for operation: GetLastError=%lu\n",
+                       buffer_id, GetLastError());
+            }
+        }
+    }
 }
 
 static struct virgl_apir_callbacks g_windows_callbacks = {

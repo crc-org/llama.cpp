@@ -7,8 +7,11 @@
 
 #include <cstdint>
 
+// CACHE COHERENCY: External functions for buffer management (defined in main.cpp)
+extern "C" void unmap_all_session_buffers(uint32_t session_id);
+extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id);
+
 uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
-    GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
 
     static bool async_backend_initialized = false;
@@ -53,13 +56,28 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
         return 0;
     }
 #endif
+
+    // CACHE COHERENCY: Unmap all buffers to flush cached data
+    printf("[BACKEND] Unmapping all session buffers for cache coherency...\n");
+    unmap_all_session_buffers(ctx->ctx_id);
+
+    // CACHE COHERENCY: Map all buffers with fresh mappings for computation
+    printf("[BACKEND] Mapping all session buffers for computation...\n");
+    ensure_all_session_buffers_mapped(ctx->ctx_id);
+
+    // Run the actual computation
     status = bck->iface.graph_compute(bck, cgraph);
 
     if (async_backend) {
         bck->iface.synchronize(bck);
     }
 
+    // CACHE COHERENCY: Unmap all buffers so guest sees fresh data
+    printf("[BACKEND] Unmapping all session buffers post-computation...\n");
+    unmap_all_session_buffers(ctx->ctx_id);
+
     apir_encode_ggml_status(enc, &status);
 
     return 0;
 }
+

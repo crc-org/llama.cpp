@@ -6,6 +6,9 @@
 
 #include <cstdint>
 
+// CACHE COHERENCY: External function to ensure all session buffers are mapped
+extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id);
+
 uint32_t backend_buffer_get_base(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
     ggml_backend_buffer_t buffer;
@@ -28,8 +31,11 @@ uint32_t backend_buffer_get_base(apir_encoder * enc, apir_decoder * dec, virgl_a
 }
 
 uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
-    GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
+
+    // CACHE COHERENCY: Ensure all session buffers are mapped before operations
+    printf("[BACKEND] Ensuring buffers mapped for buffer_set_tensor operation\n");
+    ensure_all_session_buffers_mapped(ctx->ctx_id);
 
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
@@ -70,8 +76,11 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
 }
 
 uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
-    GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
+
+    // CACHE COHERENCY: Ensure all session buffers are mapped before operations
+    printf("[BACKEND] Ensuring buffers mapped for buffer_get_tensor operation\n");
+    ensure_all_session_buffers_mapped(ctx->ctx_id);
 
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
@@ -119,8 +128,11 @@ uint32_t backend_buffer_cpy_tensor(apir_encoder * enc, apir_decoder * dec, virgl
 }
 
 uint32_t backend_buffer_clear(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
-    GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
+
+    // CACHE COHERENCY: Ensure all session buffers are mapped before operations
+    printf("[BACKEND] Ensuring buffers mapped for buffer_clear operation\n");
+    ensure_all_session_buffers_mapped(ctx->ctx_id);
 
     ggml_backend_buffer_t buffer;
     buffer = apir_decode_ggml_buffer(dec);
