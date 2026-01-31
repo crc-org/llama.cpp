@@ -2080,9 +2080,15 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
     char* apir_data_start = (char*)input_mapped_memory;
-    if (cmd_type == APIR_COMMAND_TYPE_FORWARD) {
+    printf("[DEBUG] cmd_type=%u, skipping APIR header for forward commands\n", cmd_type);
+
+    // All function calls (1-22) are forward commands that have APIR header
+    if (cmd_type >= 1 && cmd_type <= 22) {
+        printf("[DEBUG] Skipping APIR header: 8 bytes\n");
         // Skip header: uint32_t cmd_type + int32_t cmd_flags = 8 bytes
         apir_data_start += sizeof(uint32_t) + sizeof(int32_t);
+    } else {
+        printf("[DEBUG] NOT skipping APIR header - unknown command type\n");
     }
 
     // Reserve space for return code at beginning of response buffer
