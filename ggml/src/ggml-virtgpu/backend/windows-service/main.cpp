@@ -2078,18 +2078,35 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         _exit(1);
     }
 
-    // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
+    // Read APIR header values and advance pointer properly
     char* apir_data_start = (char*)input_mapped_memory;
-    printf("[DEBUG] cmd_type=%u, skipping APIR header for forward commands\n", cmd_type);
+    printf("[DEBUG] cmd_type=%u, reading APIR header\n", cmd_type);
 
-    // All function calls (1-22) are forward commands that have APIR header
-    if (cmd_type >= 1 && cmd_type <= 22) {
-        printf("[DEBUG] Skipping APIR header: 8 bytes\n");
-        // Skip header: uint32_t cmd_type + int32_t cmd_flags = 8 bytes
-        apir_data_start += sizeof(uint32_t) + sizeof(int32_t);
-    } else {
-        printf("[DEBUG] NOT skipping APIR header - unknown command type\n");
+#define READ_APIR_HEADER(buffer_ptr, main_cmd, secondary_cmd) \
+    do { \
+        /* Read main cmd_type (should be APIR_COMMAND_TYPE_FORWARD) */ \
+        main_cmd = *((uint32_t*)(buffer_ptr)); \
+        buffer_ptr += sizeof(uint32_t); \
+        /* Read secondary cmd_type (specific function ID) */ \
+        secondary_cmd = *((int32_t*)(buffer_ptr)); \
+        buffer_ptr += sizeof(int32_t); \
+        printf("[DEBUG] Read APIR header: main_cmd=%u, secondary_cmd=%d\n", main_cmd, secondary_cmd); \
+    } while (0)
+
+    uint32_t main_cmd_type;
+    int32_t secondary_cmd_type;
+
+    READ_APIR_HEADER(apir_data_start, main_cmd_type, secondary_cmd_type);
+
+    // Validate that we read the expected values
+    if (main_cmd_type != APIR_COMMAND_TYPE_FORWARD) {
+        printf("[ERROR] Expected main_cmd_type=%d, got %u\n", APIR_COMMAND_TYPE_FORWARD, main_cmd_type);
     }
+    if (secondary_cmd_type != (int32_t)cmd_type) {
+        printf("[ERROR] Expected secondary_cmd_type=%u, got %d\n", cmd_type, secondary_cmd_type);
+    }
+
+    printf("[DEBUG] APIR header processed, pointer advanced by %zu bytes\n", sizeof(uint32_t) + sizeof(int32_t));
 
     // Reserve space for return code at beginning of response buffer
     uint32_t* return_code_pos = (uint32_t*)response_mapped_memory;
