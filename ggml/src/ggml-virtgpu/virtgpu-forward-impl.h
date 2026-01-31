@@ -124,12 +124,11 @@ static inline const char * frontend_command_name(int cmd_type) {
 
 #define REMOTE_CALL_PREPARE(gpu_dev_name, encoder_name, apir_command_type__)                               \
     do {                                                                                                   \
-        int32_t forward_flag = (int32_t) apir_command_type__;                                              \
+        int32_t forward_flag = (int32_t) (apir_command_type__);                                            \
         const char * method_name = frontend_command_name(forward_flag);                                    \
         printf("[FRONTEND] Calling method: %s (cmd_type=%d)\n", method_name, forward_flag);             \
-        fflush(stdout);                                                                                    \
-        encoder_name         = remote_call_prepare(gpu_dev_name, APIR_COMMAND_TYPE_FORWARD, forward_flag); \
-        if (!encoder_name) {                                                                               \
+        (encoder_name)       = remote_call_prepare((gpu_dev_name), APIR_COMMAND_TYPE_FORWARD, forward_flag); \
+        if (!(encoder_name)) {                                                                             \
             printf("FATAL: %s: failed to prepare the remote call encoder\n", __func__);                 \
             fflush(stdout);                                                                              \
             exit(1);                                                                                     \
@@ -196,8 +195,6 @@ static inline temp_file_request_result_t send_temp_file_request(virtgpu* gpu, co
              "}",
              cmd_type, cmd_size, cmd_file_path, reply_file_path);
 
-    printf("Sending temp file request to Windows service: %s\n", json_request);
-
     /* Send JSON via TCP socket */
     size_t msg_len = strlen(json_request);
     uint32_t network_len = htonl((uint32_t)msg_len);
@@ -226,15 +223,12 @@ static inline temp_file_request_result_t send_temp_file_request(virtgpu* gpu, co
         return error_result;
     }
 
-    printf("Received response from Windows service: %s\n", response_buffer);
-
     /* Parse response_size from JSON - simple string search */
     size_t actual_response_size = 0;
     const char* size_start = strstr(response_buffer, "\"response_size\":");
     if (size_start) {
         size_start += 16; // Skip "response_size":
         actual_response_size = (size_t)strtoul(size_start, NULL, 10);
-        printf("Actual response size from service: %zu bytes\n", actual_response_size);
     }
 
     /* Return both success code and actual size */
@@ -280,13 +274,6 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
 
     memcpy(temp_cmd_buf.mmap_ptr, encoder->start, cmd_size);
 
-    /* Debug: Show what we're writing to temporary file */
-    printf("[DEBUG] Writing to temp file (%zu bytes): ", cmd_size);
-    for (size_t i = 0; i < cmd_size && i < 16; i++) {
-        printf("%02x ", ((unsigned char*)encoder->start)[i]);
-    }
-    printf("\n");
-
     /* Force data to disk to ensure WSL2/Windows cache coherency */
     msync(temp_cmd_buf.mmap_ptr, temp_cmd_buf.size, MS_SYNC);
     fsync(temp_cmd_buf.fd);
@@ -309,23 +296,11 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
     temp_reply_buf.mmap_ptr = NULL;
     temp_reply_buf.fd = -1;
 
-    /* Debug: Show raw encoder data to understand APIR structure */
+    /* Extract function_id from APIR structure for JSON transmission */
     if (cmd_size >= 8) {
-        uint32_t* data_ptr = (uint32_t*)encoder->start;
-        printf("[DEBUG] Encoder raw data (%zu bytes): [0]=0x%08x [1]=0x%08x\n",
-               cmd_size, data_ptr[0], data_ptr[1]);
-
-        /* According to Windows service comments:
-         * APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...]
-         * apir_cmd_type = data_ptr[0] (e.g., APIR_COMMAND_TYPE_FORWARD)
-         * function_id = data_ptr[1] (e.g., 3 for backend_device_get_description)
-         */
-        uint32_t apir_cmd_type = data_ptr[0];
+        const uint32_t* data_ptr = (const uint32_t*)encoder->start;
+        /* APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...] */
         uint32_t function_id = data_ptr[1];
-
-        printf("[DEBUG] APIR structure: apir_cmd_type=%u, function_id=%u\n",
-               apir_cmd_type, function_id);
-
         /* Use the function_id for JSON (not apir_cmd_type) */
         actual_cmd_type = function_id;
     }
@@ -337,8 +312,6 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
     if (result >= APIR_FORWARD_BASE_INDEX) {
         /* Use actual response size from Windows service */
         size_t actual_response_size = request_result.actual_response_size;
-        /* Read reply from temporary file using actual response size */
-        printf("[DEBUG] About to read temp file with actual_response_size = %zu bytes\n", actual_response_size);
 
         temp_reply_buf.fd = open(temp_reply_buf.file_path, O_RDONLY);
         if (temp_reply_buf.fd >= 0) {
@@ -346,54 +319,14 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
                 /* Allocate persistent buffer for reply data */
                 static char persistent_reply_buffer[16 * 1024 * 1024];
 
-                printf("[DEBUG] Calling read() with size %zu\n", actual_response_size);
                 ssize_t bytes_read = read(temp_reply_buf.fd, persistent_reply_buffer, actual_response_size);
-                printf("[DEBUG] read() returned %zd bytes\n", bytes_read);
 
                 if (bytes_read > 0 && bytes_read <= (ssize_t)actual_response_size) {
-                    printf("Successfully read %zd bytes from temp file (expected %zu): %s\n",
-                           bytes_read, actual_response_size, temp_reply_buf.file_path);
-
-                    /* Debug: Show raw bytes to understand the format */
-                    printf("[DEBUG] Raw response bytes: ");
-                    for (int i = 0; i < bytes_read && i < 32; i++) {
-                        printf("%02x ", (unsigned char)persistent_reply_buffer[i]);
-                    }
-                    printf("\n");
-
-                    /* Debug: Show as uint32_t values */
-                    if (bytes_read >= 12) {
-                        uint32_t* values = (uint32_t*)persistent_reply_buffer;
-                        printf("[DEBUG] As uint32_t values: [0]=%u [1]=%u [2]=%u\n", values[0], values[1], values[2]);
-                    }
 
                     /* Create decoder using proper initialization */
-                    printf("[DEBUG] About to call apir_decoder_init with buffer=%p, size=%zd\n",
-                           persistent_reply_buffer, (size_t)bytes_read);
                     *decoder = apir_decoder_init(persistent_reply_buffer, (size_t)bytes_read);
                     if (*decoder == NULL) {
                         printf("Failed to initialize apir_decoder\n");
-                    } else {
-                        printf("[DEBUG] Decoder pointer: %p\n", *decoder);
-                        printf("[DEBUG] Decoder cur=%p, end=%p\n", (*decoder)->cur, (*decoder)->end);
-                        printf("[DEBUG] Expected end should be: %p (cur + size)\n",
-                               (void*)((char*)persistent_reply_buffer + (size_t)bytes_read));
-                        size_t calculated_available = (size_t)((*decoder)->end - (*decoder)->cur);
-                        printf("[DEBUG] Calculated available: %zd\n", calculated_available);
-
-                        /* Test decoder immediately to see what happens */
-                        printf("[DEBUG] About to test decoder read...\n");
-
-                        /* Try to read the first uint32_t (4 bytes) to see what happens */
-                        if ((size_t)((*decoder)->end - (*decoder)->cur) >= 4) {
-                            uint32_t test_value = 0;
-                            bool read_success = apir_decoder_peek_internal(*decoder, 4, &test_value, 4);
-                            printf("[DEBUG] Test read success: %s, value: %u\n", read_success ? "true" : "false", test_value);
-                        } else {
-                            printf("[DEBUG] Not enough bytes for test read\n");
-                        }
-
-                        printf("[DEBUG] Decoder successfully created for %zd bytes\n", (size_t)bytes_read);
                     }
                 } else {
                     printf("Failed to read expected %zu bytes from temp reply file (got %zd)\n", actual_response_size, bytes_read);
@@ -421,17 +354,17 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
 
 #define REMOTE_CALL(gpu_dev_name, encoder_name, decoder_name, ret_name)                                           \
     do {                                                                                                          \
-        ret_name = execute_temp_file_remote_call(gpu_dev_name, encoder_name, &decoder_name);                     \
-        if (!decoder_name) {                                                                                      \
+        (ret_name) = execute_temp_file_remote_call((gpu_dev_name), (encoder_name), &(decoder_name));            \
+        if (!(decoder_name)) {                                                                                    \
             printf("FATAL: %s: failed to kick the remote call\n", __func__);                                   \
             fflush(stdout);                                                                                      \
             exit(1);                                                                                             \
         }                                                                                                         \
-        if (ret_name < APIR_FORWARD_BASE_INDEX) {                                                                 \
+        if ((ret_name) < APIR_FORWARD_BASE_INDEX) {                                                               \
             printf("FATAL: %s: failed to forward the API call: %s: code %d\n", __func__,                       \
-                   apir_forward_error(ret_name), ret_name);                                                       \
+                   apir_forward_error((ret_name)), (ret_name));                                                   \
             fflush(stdout);                                                                                        \
             exit(1);                                                                                               \
         }                                                                                                         \
-        ret_name = (ApirForwardReturnCode) (ret_name - APIR_FORWARD_BASE_INDEX);                                  \
+        (ret_name) = (ApirForwardReturnCode) ((ret_name) - APIR_FORWARD_BASE_INDEX);                             \
     } while (0)

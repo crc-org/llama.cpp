@@ -1160,7 +1160,6 @@ DWORD HandleClient(SOCKET client_socket)
  */
 DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* response_json, size_t response_size)
 {
-    printf("[DEBUG] Received JSON request: %s\n", request_json);
 
     Json::Value request, response;
     Json::StreamWriterBuilder builder;
@@ -1177,13 +1176,6 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
         parse_result = reader->parse(json_copy.c_str(),
                                    json_copy.c_str() + json_copy.length(),
                                    &request, &parse_errors);
-        printf("[DEBUG] JSON library parse_result: %s\n", parse_result ? "SUCCESS" : "FAILED");
-        if (!parse_result) {
-            printf("[DEBUG] JSON parse errors: %s\n", parse_errors.c_str());
-        }
-        if (parse_result) {
-            printf("[DEBUG] JSON library extracted apir_cmd_type: %u\n", request.get("apir_cmd_type", 0).asUInt());
-        }
     } catch (const std::exception& e) {
         printf("[ERROR] Exception during parsing: %s\n", e.what());
         parse_result = false;
@@ -1212,7 +1204,6 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
 
     // Simple manual parsing - more reliable than buggy jsoncpp
     const char* json_str = json_copy.c_str();
-    printf("[DEBUG] JSON for manual parsing: %s\n", json_str);
 
     // Extract api field: "api":"apir"
     const char* api_start = strstr(json_str, "\"api\":\"");
@@ -1242,7 +1233,6 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
     if (cmd_type_start) {
         cmd_type_start += 16; // Skip "apir_cmd_type":
         apir_cmd_type = (UINT32)strtoul(cmd_type_start, NULL, 10);
-        printf("[DEBUG] Parsed apir_cmd_type from JSON: %u (from string: %.10s)\n", apir_cmd_type, cmd_type_start);
     } else {
         apir_cmd_type = 255;
     }
@@ -1373,8 +1363,6 @@ DWORD ProcessAPIRequest(SOCKET client_socket, const char* request_json, char* re
                 }
             }
 
-            printf("[DEBUG] Path conversion: Windows='%s' -> WSL2='%s'\n",
-                   latest_file_path.c_str(), wsl_file_path.c_str());
 
             // Create manual JSON success response
             snprintf(response_json, response_size,
@@ -1877,14 +1865,6 @@ ApirLoadLibraryReturnCode SafeAPIRBackendInit(bool* crashed_out)
 DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Value& response, const std::string& response_file_path)
 {
     UINT32 cmd_type = request.get("apir_cmd_type", 0).asUInt();
-    printf("[DEBUG] HandleAPIRAPI: JSON library extracted cmd_type=%u\n", cmd_type);
-    printf("[DEBUG] HandleAPIRAPI: request.isMember(\"apir_cmd_type\")=%s\n",
-           request.isMember("apir_cmd_type") ? "true" : "false");
-    if (request.isMember("apir_cmd_type")) {
-        printf("[DEBUG] HandleAPIRAPI: raw value type=%d, raw value as uint=%u\n",
-               request["apir_cmd_type"].type(),
-               request["apir_cmd_type"].asUInt());
-    }
     UINT64 apir_data_size = request.get("apir_data_size", 0).asUInt64();
     UINT32 buffer_id = request.get("buffer_id", 0).asUInt();
     UINT32 response_buffer_id = request.get("response_buffer_id", buffer_id).asUInt(); // Default to input buffer if not specified
@@ -1900,7 +1880,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         ApirLoadLibraryReturnCode init_result = SafeAPIRBackendInit(&init_crashed);
 
         if (init_result != APIR_LOAD_LIBRARY_INIT_BASE_INDEX || init_crashed) {
-            printf("[DEBUG] HandleAPIRAPI: APIR backend init failed - returning ERROR_INVALID_FUNCTION\n");
+            printf("[ERROR] APIR backend initialization failed\n");
             return ERROR_INVALID_FUNCTION;
         }
         g_ctx.apir_backend_initialized = TRUE;
@@ -1909,7 +1889,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     // Check if shared_file_path exists in JSON before attempting string conversion
     if (!request.isMember("shared_file_path") || request["shared_file_path"].isNull()) {
-        printf("[DEBUG] HandleAPIRAPI: Missing shared_file_path - returning ERROR_INVALID_PARAMETER\n");
+        printf("[ERROR] Missing shared_file_path parameter\n");
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -1934,7 +1914,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
 
     auto session_it = g_client_sessions.find(session_id);
     if (session_it == g_client_sessions.end()) {
-        printf("[DEBUG] HandleAPIRAPI: Session %u not found - returning ERROR_INVALID_PARAMETER\n", session_id);
+        printf("[ERROR] Session %u not found\n", session_id);
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -1955,7 +1935,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         }
     }
 
-    printf("[DEBUG] HandleAPIRAPI: Using temporary command file: %s\n", windows_cmd_path.c_str());
 
     // Map temporary command file
     void* input_mapped_memory = nullptr;
@@ -2003,10 +1982,9 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         return ERROR_INVALID_HANDLE;
     }
 
-    printf("[DEBUG] Mapped temporary command file: size=%zu\n", input_buffer_size);
 
     if (apir_data_size > input_buffer_size) {
-        printf("[DEBUG] HandleAPIRAPI: Input size mismatch - returning ERROR_INVALID_PARAMETER\n");
+        printf("[ERROR] Input size mismatch\n");
         return ERROR_INVALID_PARAMETER;
     }
 
@@ -2027,7 +2005,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
             std::replace(windows_response_path.begin(), windows_response_path.end(), '/', '\\');
         }
 
-        printf("[DEBUG] HandleAPIRAPI: Using temporary response file: %s\n", windows_response_path.c_str());
 
         // Open temporary response file
         temp_response_file = CreateFileA(
@@ -2052,7 +2029,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
                 // Map the file
                 response_mapped_memory = MapViewOfFile(temp_response_mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
                 if (response_mapped_memory != NULL) {
-                    printf("[DEBUG] Mapped temporary response file: size=%zu\n", response_buffer_size);
                 } else {
                     printf("[ERROR] Failed to map temporary response file view\n");
                     CloseHandle(temp_response_mapping);
@@ -2072,7 +2048,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         // Use registered shared buffer (original approach)
         auto response_buffer_it = session.buffers.find(response_buffer_id);
         if (response_buffer_it == session.buffers.end()) {
-            printf("[DEBUG] HandleAPIRAPI: Response buffer %u not found in session %u\n", response_buffer_id, session_id);
+            printf("[ERROR] Response buffer %u not found in session %u\n", response_buffer_id, session_id);
             return ERROR_INVALID_PARAMETER;
         }
 
@@ -2090,18 +2066,7 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         // APIR data structure: [uint32_t apir_cmd_type, int32_t function_id, ...]
         // The second field (cmd_flags) contains the actual function ID
         if (apir_data_size >= sizeof(uint32_t) + sizeof(int32_t)) {
-            // Debug: Show raw bytes from temporary file
-            printf("[DEBUG] Raw APIR data from temp file (%I64u bytes): ", apir_data_size);
-            for (int i = 0; i < min(16, (int)apir_data_size); i++) {
-                printf("%02x ", ((unsigned char*)input_mapped_memory)[i]);
-            }
-            printf("\n");
-
-            uint32_t read_apir_cmd_type = *(uint32_t*)input_mapped_memory;
             function_id = *(int32_t*)((char*)input_mapped_memory + sizeof(uint32_t));
-
-            printf("[DEBUG] Read from temp file: apir_cmd_type=%u, function_id=%d\n",
-                   read_apir_cmd_type, function_id);
         } else {
             printf("[ERROR] Forward command has insufficient data size: %I64u bytes\n", apir_data_size);
             return ERROR_INVALID_PARAMETER;
@@ -2111,8 +2076,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
     if (function_id == 0) {
         printf("\n\n[ERROR] Function ID is 0, that's unexpected :/\n");
         _exit(1);
-    } else {
-        printf("\n\n[INFO] Function ID is %d, that's nice :)\n\n\n", function_id);
     }
 
     // Skip the APIR header (cmd_type + cmd_flags) that we already extracted
@@ -2160,7 +2123,6 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         if (temp_response_file != INVALID_HANDLE_VALUE) {
             CloseHandle(temp_response_file);
         }
-        printf("[DEBUG] Cleaned up temporary response file resources, total_response_size=%zu\n", total_response_size);
     }
 
     // Cleanup temporary command file resources if used
@@ -2169,11 +2131,9 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
             UnmapViewOfFile(input_mapped_memory);
         }
         CloseHandle(temp_cmd_mapping);
-        printf("[DEBUG] Cleaned up temporary command file mapping\n");
     }
     if (temp_cmd_file != INVALID_HANDLE_VALUE) {
         CloseHandle(temp_cmd_file);
-        printf("[DEBUG] Cleaned up temporary command file handle\n");
     }
 
     // Avoid Json::Value objects completely - return success code for manual JSON handling
@@ -2316,8 +2276,6 @@ DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request
     snprintf(file_path, sizeof(file_path), "C:\\temp\\ggml_shared_%u_%u_%I64u.dat",
              session_id, buffer_id, buffer_size);
 
-    printf("[DEBUG] HandleBufferAllocationAPI: session_id=%u, allocating buffer_id=%u, file_path=%s\n",
-           session_id, buffer_id, file_path);
 
     // Create the file
     HANDLE file_handle = CreateFileA(
@@ -2394,8 +2352,6 @@ DWORD HandleBufferAllocationAPI(SOCKET client_socket, const Json::Value& request
 
     session.buffers[buffer_id] = mapping;
 
-    printf("[DEBUG] HandleBufferAllocationAPI: Successfully allocated buffer %u in session %u (address=%p, size=%I64u)\n",
-           buffer_id, session_id, mapped_memory, buffer_size);
 
     return ERROR_SUCCESS;
 }

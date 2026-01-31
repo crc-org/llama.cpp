@@ -27,8 +27,12 @@ int apir_device_get_count(virtgpu * gpu) {
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_DEVICE_GET_COUNT);
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    apir_decode_int32_t(decoder, &dev_count);
+    /* Skip Windows service status code (first uint32_t) before reading APIR data */
+    uint32_t service_status;
+    apir_decode_uint32_t(decoder, &service_status);
 
+    apir_decode_int32_t(decoder, &dev_count);
+    printf("==> %d\n", dev_count);
     remote_call_finish(gpu, encoder, decoder);
 #if CHECK_CONSISTENCY == 1
     // INSTRUMENTATION: Exit if more than 2 devices found
@@ -52,7 +56,6 @@ char * apir_device_get_name(virtgpu * gpu) {
     /* Skip Windows service status code (first uint32_t) before reading APIR data */
     uint32_t service_status;
     apir_decode_uint32_t(decoder, &service_status);
-    printf("[DEBUG] Windows service status: %u\n", service_status);
 
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
     char            * string = (char *) apir_decoder_alloc_array(sizeof(char), string_size);
@@ -79,7 +82,6 @@ char * apir_device_get_description(virtgpu * gpu) {
     /* Skip Windows service status code (first uint32_t) before reading APIR data */
     uint32_t service_status;
     apir_decode_uint32_t(decoder, &service_status);
-    printf("[DEBUG] Windows service status: %u\n", service_status);
 
     const size_t string_size = apir_decode_array_size_unchecked(decoder);
 #if CHECK_CONSISTENCY == 1
@@ -183,7 +185,7 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
         remote_call_finish(gpu, encoder, decoder);
         return 0; // Return 0 to indicate failure
     }
-
+    printf("==> %p\n", (void *)buft_handle);
     remote_call_finish(gpu, encoder, decoder);
 
     return buft_handle;

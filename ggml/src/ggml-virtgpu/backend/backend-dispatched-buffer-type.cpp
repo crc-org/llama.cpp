@@ -14,7 +14,10 @@ uint32_t backend_buffer_type_get_name(apir_encoder * enc, apir_decoder * dec, vi
 
     ggml_backend_buffer_type_t buft = apir_decode_ggml_buffer_type(dec);
 
-    if (buft == NULL || (uintptr_t)buft < 0x10000) {
+    printf("[BACKEND] %s: Received buffer type handle = %p\n", __func__,
+           (void*)buft);
+
+    if (buft == NULL || (uintptr_t)buft < 0x10000 || (uintptr_t)buft == 0x0000000A00000002) {
         return 1;
     }
 
@@ -33,10 +36,11 @@ uint32_t backend_buffer_type_get_alignment(apir_encoder * enc, apir_decoder * de
     buft = apir_decode_ggml_buffer_type(dec);
 
     // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] backend_buffer_type_get_alignment: Received buffer type handle = %p\n",
+    printf("[BACKEND] %s: Received buffer type handle = %p\n", __func__,
            (void*)buft);
 
     if (!buft || (uintptr_t)buft < 0x10000) {
+        printf("Unexpected buft. Exiting.\n");
         return 1;
     }
 
