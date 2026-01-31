@@ -120,6 +120,9 @@ uint32_t backend_device_get_buffer_type(apir_encoder * enc, apir_decoder * dec, 
         printf("[BACKEND] ERROR: Invalid buffer type handle %p - backend logic error\n", (void*)bufft);
         return 1;
     }
+
+    printf("[BACKEND] buffer type handle ==> 0x%p \n", (void*)bufft);
+
     apir_encode_ggml_buffer_type(enc, bufft);
 
     return 0;

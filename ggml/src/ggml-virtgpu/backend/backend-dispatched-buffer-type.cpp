@@ -9,17 +9,23 @@
 #include <cstring>
 #include <climits>
 
+#define CHECK_BUFT(buft) \
+    do {                                                                \
+        printf("[BACKEND] %s: Received buffer type handle = %p\n", __func__, \
+               (void*)buft);                                            \
+                                                                        \
+        if (buft == NULL || (uintptr_t)buft < 0x10000 || (uintptr_t)buft == 0x0000000A00000002) { \
+            printf("Unexpected buft. Aborting.\n");                     \
+            return 1;                                                   \
+        }                                                               \
+    } while(0)
+
 uint32_t backend_buffer_type_get_name(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
 
     ggml_backend_buffer_type_t buft = apir_decode_ggml_buffer_type(dec);
 
-    printf("[BACKEND] %s: Received buffer type handle = %p\n", __func__,
-           (void*)buft);
-
-    if (buft == NULL || (uintptr_t)buft < 0x10000 || (uintptr_t)buft == 0x0000000A00000002) {
-        return 1;
-    }
+    CHECK_BUFT(buft);
 
     const char * string = buft->iface.get_name(buft);
 
@@ -35,14 +41,7 @@ uint32_t backend_buffer_type_get_alignment(apir_encoder * enc, apir_decoder * de
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
 
-    // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] %s: Received buffer type handle = %p\n", __func__,
-           (void*)buft);
-
-    if (!buft || (uintptr_t)buft < 0x10000) {
-        printf("Unexpected buft. Exiting.\n");
-        return 1;
-    }
+    CHECK_BUFT(buft);
 
     size_t value = 0;
     if (buft->iface.get_alignment) {
@@ -58,23 +57,7 @@ uint32_t backend_buffer_type_get_max_size(apir_encoder * enc, apir_decoder * dec
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
 
-    // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] backend_buffer_type_get_max_size: Received buffer type handle = %p\n",
-           (void*)buft);
-
-    if (!buft) {
-        printf("[ERROR] backend_buffer_type_get_max_size: buft is NULL\n");
-        return 1; // Return error code
-    }
-
-    if ((uintptr_t)buft < 0x10000) {
-        printf("[ERROR] backend_buffer_type_get_max_size: Invalid buffer type handle %p - too small for pointer\n",
-               (void*)buft);
-        printf("[ERROR] This indicates corrupted data or backend logic error\n");
-        return 1;
-    }
-
-    printf("[BACKEND] Buffer type handle validation passed for get_max_size\n");
+    CHECK_BUFT(buft);
 
     size_t value = SIZE_MAX;
     if (buft->iface.get_max_size) {
@@ -105,23 +88,7 @@ uint32_t backend_buffer_type_alloc_buffer(apir_encoder * enc, apir_decoder * dec
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
 
-    // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] backend_buffer_type_alloc_buffer: Received buffer type handle = %p\n",
-           (void*)buft);
-
-    if (!buft) {
-        printf("[ERROR] backend_buffer_type_alloc_buffer: buft is NULL\n");
-        return 1;
-    }
-
-    if ((uintptr_t)buft < 0x10000) {
-        printf("[ERROR] backend_buffer_type_alloc_buffer: Invalid buffer type handle %p - too small for pointer\n",
-               (void*)buft);
-        printf("[ERROR] This indicates corrupted data or backend logic error\n");
-        return 1;
-    }
-
-    printf("[BACKEND] Buffer type handle validation passed for alloc_buffer\n");
+    CHECK_BUFT(buft);
 
     size_t size;
     apir_decode_size_t(dec, &size);
@@ -146,23 +113,7 @@ uint32_t backend_buffer_type_get_alloc_size(apir_encoder * enc, apir_decoder * d
     ggml_backend_buffer_type_t buft;
     buft = apir_decode_ggml_buffer_type(dec);
 
-    // Fool check: Comprehensive buffer type handle validation
-    printf("[BACKEND] backend_buffer_type_get_alloc_size: Received buffer type handle = %p\n",
-           (void*)buft);
-
-    if (!buft) {
-        printf("[ERROR] backend_buffer_type_get_alloc_size: buft is NULL\n");
-        return 1;
-    }
-
-    if ((uintptr_t)buft < 0x10000) {
-        printf("[ERROR] backend_buffer_type_get_alloc_size: Invalid buffer type handle %p - too small for pointer\n",
-               (void*)buft);
-        printf("[ERROR] This indicates corrupted data or backend logic error\n");
-        return 1;
-    }
-
-    printf("[BACKEND] Buffer type handle validation passed for get_alloc_size\n");
+    CHECK_BUFT(buft);
 
     const ggml_tensor * op = apir_decode_ggml_tensor_inplace(dec);
 

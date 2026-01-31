@@ -173,7 +173,7 @@ apir_buffer_type_host_handle_t apir_device_get_buffer_type(virtgpu * gpu) {
         remote_call_finish(gpu, encoder, decoder);
         return 0; // Return 0 to indicate failure
     }
-    printf("==> %p\n", (void *)buft_handle);
+    printf("BUFT ==> %p <==\n", (void *)buft_handle);
     remote_call_finish(gpu, encoder, decoder);
 
     return buft_handle;
