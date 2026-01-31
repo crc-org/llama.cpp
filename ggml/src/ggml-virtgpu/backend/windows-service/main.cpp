@@ -2085,18 +2085,27 @@ DWORD HandleAPIRAPI(SOCKET client_socket, const Json::Value& request, Json::Valu
         apir_data_start += sizeof(uint32_t) + sizeof(int32_t);
     }
 
-    // Call the APIR backend dispatcher using session ID as virgl_ctx_id
+    // Reserve space for return code at beginning of response buffer
+    uint32_t* return_code_pos = (uint32_t*)response_mapped_memory;
+    *return_code_pos = 0xFFFFFFFF;  // Placeholder value
 
+    // Start data encoding after the reserved return code space
+    char* data_start = (char*)response_mapped_memory + sizeof(uint32_t);
+
+    // Call the APIR backend dispatcher using session ID as virgl_ctx_id
     uint32_t dispatch_result = apir_backend_dispatcher(
         session_id,                        // virgl_ctx_id (client session ID)
         &g_windows_callbacks,               // Windows callback interface
         function_id,                       // Specific APIR function ID (not the general Forward type)
         apir_data_start,                   // Input buffer after header (from input buffer)
         (char*)input_mapped_memory + apir_data_size, // Input end (from input buffer)
-        (char*)response_mapped_memory,     // Output buffer - write to response buffer!
+        data_start,                        // Output buffer - write after reserved return code space!
         (char*)response_mapped_memory + response_buffer_size, // Output end (response buffer)
         &enc_cur_after                     // Output position after encoding
     );
+
+    // Write the actual return code in the reserved space
+    *return_code_pos = dispatch_result;
 
     // Force Windows cache coherency - ensure WSL2 guest sees fresh response data
     size_t total_response_size = enc_cur_after - (char*)response_mapped_memory;

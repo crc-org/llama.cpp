@@ -418,4 +418,3 @@ static const virtgpu_backend_ops windows_ops = {
 const virtgpu_backend_ops* virtgpu_backend_windows_winapi_get_ops(void) {
     return &windows_ops;
 }
-

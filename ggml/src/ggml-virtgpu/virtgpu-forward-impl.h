@@ -327,6 +327,23 @@ static inline ApirForwardReturnCode execute_temp_file_remote_call(virtgpu* gpu, 
                     *decoder = apir_decoder_init(persistent_reply_buffer, (size_t)bytes_read);
                     if (*decoder == NULL) {
                         printf("Failed to initialize apir_decoder\n");
+                    } else {
+                        /* Check backend return code before allowing data access */
+                        uint32_t backend_return_code;
+                        if (apir_decoder_peek_internal(*decoder, sizeof(uint32_t), &backend_return_code, sizeof(uint32_t))) {
+                            if (backend_return_code != 0) {
+                                printf("[REMOTE_CALL] Backend returned error code %u, aborting\n", backend_return_code);
+                                apir_decoder_deinit(*decoder);
+                                *decoder = NULL;
+                            } else {
+                                /* Skip the return code so decoder is positioned at actual data */
+                                apir_decode_uint32_t(*decoder, &backend_return_code);
+                            }
+                        } else {
+                            printf("Failed to read backend return code\n");
+                            apir_decoder_deinit(*decoder);
+                            *decoder = NULL;
+                        }
                     }
                 } else {
                     printf("Failed to read expected %zu bytes from temp reply file (got %zd)\n", actual_response_size, bytes_read);
