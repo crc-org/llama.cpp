@@ -37,7 +37,9 @@ extern "C" {
 // Guest side: Unmap memory and close FD to flush data for host access
 void virtgpu_shmem_unmap_for_host(virtgpu_shmem * shmem) {
     local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
-    if (!local_shmem || !local_shmem->backend_data) return;
+    if (!local_shmem || !local_shmem->backend_data) {
+        return;
+    }
 
     ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)local_shmem->backend_data;
 
@@ -66,7 +68,9 @@ void virtgpu_shmem_unmap_for_host(virtgpu_shmem * shmem) {
 // Guest side: Reopen file and remap at original address to see host changes
 int virtgpu_shmem_remap_after_host(virtgpu_shmem * shmem, void * original_ptr) {
     local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
-    if (!local_shmem || !local_shmem->backend_data) return 0;
+    if (!local_shmem || !local_shmem->backend_data) {
+        return 0;
+    }
 
     ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)local_shmem->backend_data;
 
