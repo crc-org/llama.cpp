@@ -8,9 +8,16 @@
 #include <vector>
 
 std::unordered_set<ggml_backend_buffer_t> backend_buffers;
+std::unordered_map<ggml_backend_buffer_t, uint32_t> buffer_to_res_id;
 
 void apir_track_backend_buffer(ggml_backend_buffer_t buffer) {
     backend_buffers.insert(buffer);
+}
+
+void apir_track_backend_buffer_with_res_id(ggml_backend_buffer_t buffer, uint32_t res_id) {
+    backend_buffers.insert(buffer);
+    buffer_to_res_id[buffer] = res_id;
+    printf("[BUFFER_DEBUG] Tracking buffer %p -> res_id %u\n", (void*)buffer, res_id);
 }
 
 bool apir_untrack_backend_buffer(ggml_backend_buffer_t buffer) {
@@ -20,7 +27,16 @@ bool apir_untrack_backend_buffer(ggml_backend_buffer_t buffer) {
     }
 
     backend_buffers.erase(it);
+    buffer_to_res_id.erase(buffer);  // Also remove from res_id mapping
     return true;
+}
+
+uint32_t apir_get_buffer_res_id(ggml_backend_buffer_t buffer) {
+    auto it = buffer_to_res_id.find(buffer);
+    if (it != buffer_to_res_id.end()) {
+        return it->second;
+    }
+    return 0;  // Return 0 if not found
 }
 
 std::unordered_set<ggml_backend_buffer_t> apir_get_track_backend_buffers() {

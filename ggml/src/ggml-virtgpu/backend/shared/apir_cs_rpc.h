@@ -34,8 +34,10 @@ void apir_serialize_graph(const ggml_cgraph * cgraph, std::vector<uint8_t> & out
 /* backend */
 
 void                                      apir_track_backend_buffer(ggml_backend_buffer_t buffer);
+void                                      apir_track_backend_buffer_with_res_id(ggml_backend_buffer_t buffer, uint32_t res_id);
 bool                                      apir_untrack_backend_buffer(ggml_backend_buffer_t buffer);
 std::unordered_set<ggml_backend_buffer_t> apir_get_track_backend_buffers();
+uint32_t                                  apir_get_buffer_res_id(ggml_backend_buffer_t buffer);
 
 void apir_add_tensor(ggml_tensor *                       tensor,
                      std::vector<apir_rpc_tensor> &      tensors,

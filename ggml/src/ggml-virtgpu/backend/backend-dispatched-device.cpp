@@ -169,7 +169,7 @@ uint32_t backend_device_buffer_from_ptr(apir_encoder * enc, apir_decoder * dec, 
     apir_encode_ggml_buffer_type(enc, buffer->buft);
 
     if (buffer) {
-        apir_track_backend_buffer(buffer);
+        apir_track_backend_buffer_with_res_id(buffer, shmem_res_id);
     }
 
     return 0;

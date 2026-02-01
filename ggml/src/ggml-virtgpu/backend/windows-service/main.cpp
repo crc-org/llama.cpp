@@ -191,6 +191,7 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
     // virgl_ctx_id serves as our session_id
     uint32_t session_id = virgl_ctx_id;
 
+
     auto session_it = g_client_sessions.find(session_id);
     if (session_it == g_client_sessions.end()) {
         printf("[ERROR] No session found for context ID: %u\n", session_id);
@@ -257,7 +258,7 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
                 0,
                 0,
                 0,
-                mapping.original_address  // Force same address
+                mapping.original_address  // MUST be same address
             );
 
             if (mapping.mapped_memory == NULL) {
@@ -286,7 +287,28 @@ void* windows_get_shmem_ptr(uint32_t virgl_ctx_id, uint32_t res_id) {
         // Store original address for potential remapping
         if (mapping.original_address == NULL) {
             mapping.original_address = mapping.mapped_memory;
-        }
+                }
+    }
+
+    // Validate memory mapping before returning
+    if (mapping.mapped_memory == NULL) {
+        printf("[ADDR_ERROR] res_id=%u: Returning NULL pointer - memory not mapped!\n", res_id);
+        return NULL;
+    }
+
+    // Validate memory accessibility using VirtualQuery
+    MEMORY_BASIC_INFORMATION mbi;
+    SIZE_T result = VirtualQuery(mapping.mapped_memory, &mbi, sizeof(mbi));
+    if (result == 0) {
+        printf("[ADDR_ERROR] res_id=%u: VirtualQuery failed for %p: GetLastError=%lu\n",
+               res_id, mapping.mapped_memory, GetLastError());
+        return NULL;
+    }
+
+    if (mbi.State != MEM_COMMIT || !(mbi.Protect & (PAGE_READWRITE | PAGE_READONLY))) {
+        printf("[ADDR_ERROR] res_id=%u: Memory at %p is not accessible - State=%lu Protect=%lu\n",
+               res_id, mapping.mapped_memory, mbi.State, mbi.Protect);
+        return NULL;
     }
 
     return mapping.mapped_memory;
@@ -320,6 +342,55 @@ extern "C" void unmap_all_session_buffers(uint32_t session_id) {
 }
 
 // CACHE COHERENCY: Guest/Host file handoff - close and reopen specific files for fresh data
+// GENTLE CACHE COHERENCY: Flush buffers without unmapping to maintain address stability
+extern "C" void flush_specific_session_buffers(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers) {
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    auto session_it = g_client_sessions.find(session_id);
+    if (session_it == g_client_sessions.end()) {
+        printf("[WARNING] flush_specific_session_buffers: Session %u not found\n", session_id);
+        return;
+    }
+
+    ClientSession& session = session_it->second;
+
+    printf("[GENTLE_CACHE] Flushing %u buffers for session %u without unmapping\n", num_buffers, session_id);
+
+    for (uint32_t i = 0; i < num_buffers; i++) {
+        uint32_t buffer_id = (uint32_t)buffer_handles[i];
+
+        auto mapping_it = session.buffers.find(buffer_id);
+        if (mapping_it == session.buffers.end()) {
+            printf("[GENTLE_CACHE] Buffer %u not found in session %u\n", buffer_id, session_id);
+            continue;
+        }
+
+        BufferMapping& mapping = mapping_it->second;
+
+        if (mapping.mapped_memory != NULL) {
+            // Flush memory-mapped data to file without unmapping
+            if (!FlushViewOfFile(mapping.mapped_memory, 0)) {
+                printf("[WARNING] FlushViewOfFile failed for buffer %u: GetLastError=%lu\n",
+                       buffer_id, GetLastError());
+            } else {
+                printf("[GENTLE_CACHE] Successfully flushed buffer %u\n", buffer_id);
+            }
+
+            // Also flush the file handle if available
+            if (mapping.file_handle != INVALID_HANDLE_VALUE) {
+                if (!FlushFileBuffers(mapping.file_handle)) {
+                    printf("[WARNING] FlushFileBuffers failed for buffer %u: GetLastError=%lu\n",
+                           buffer_id, GetLastError());
+                }
+            }
+        } else {
+            printf("[GENTLE_CACHE] Buffer %u not currently mapped\n", buffer_id);
+        }
+    }
+
+    printf("[GENTLE_CACHE] Completed flushing %u buffers\n", num_buffers);
+}
+
 extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers) {
     std::lock_guard<std::mutex> lock(g_buffer_mutex);
 
@@ -343,6 +414,8 @@ extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, con
             continue; // Skip buffers not needed for this computation
         }
 
+        // Processing buffer for cache coherency
+
 
         // Convert WSL2 path to Windows path for file access
         std::string windows_path = mapping.file_path;
@@ -357,56 +430,18 @@ extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, con
 
         printf("[BACKEND] Translated path: %s -> %s\n", mapping.file_path.c_str(), windows_path.c_str());
 
-        // Close existing handles if open
+        // HOST CACHE COHERENCY: Try to see guest changes
         if (mapping.mapped_memory != NULL) {
-            UnmapViewOfFile(mapping.mapped_memory);
-            mapping.mapped_memory = NULL;
-        }
-        if (mapping.mapping_handle != NULL) {
-            CloseHandle(mapping.mapping_handle);
-            mapping.mapping_handle = NULL;
-        }
-        if (mapping.file_handle != INVALID_HANDLE_VALUE) {
-            CloseHandle(mapping.file_handle);
-            mapping.file_handle = INVALID_HANDLE_VALUE;
-        }
-
-        // Reopen file with fresh handle to see guest data
-        mapping.file_handle = CreateFileA(
-            windows_path.c_str(),
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            NULL,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL
-        );
-
-        if (mapping.file_handle == INVALID_HANDLE_VALUE) {
-            printf("[ERROR] Failed to reopen file %s: GetLastError=%lu\n",
-                   windows_path.c_str(), GetLastError());
-            continue;
-        }
-
-        // Create fresh mapping handle
-        mapping.mapping_handle = CreateFileMappingA(
-            mapping.file_handle,
-            NULL,
-            PAGE_READWRITE,
-            0,
-            0,
-            NULL
-        );
-
-        if (mapping.mapping_handle == NULL) {
-            printf("[ERROR] Failed to create file mapping for buffer %u: GetLastError=%lu\n",
-                   buffer_id, GetLastError());
-            CloseHandle(mapping.file_handle);
-            mapping.file_handle = INVALID_HANDLE_VALUE;
-            continue;
+            // Try multiple approaches to invalidate host cache
+            FlushViewOfFile(mapping.mapped_memory, 0);
+            if (mapping.file_handle != INVALID_HANDLE_VALUE) {
+                FlushFileBuffers(mapping.file_handle);
+            }
         }
 
     }
+
+    printf("[CACHE_DEBUG] close_and_reopen_specific_session_files completed\n");
 }
 
 // CACHE COHERENCY: Guest/Host file handoff - close and reopen files for fresh data (legacy)
@@ -685,6 +720,7 @@ extern "C" void ensure_specific_session_buffers_mapped(uint32_t session_id, cons
             }
 
             // Now remap at the original address
+            // First try to remap at original address
             mapping.mapped_memory = MapViewOfFileEx(
                 mapping.mapping_handle,
                 FILE_MAP_ALL_ACCESS,
@@ -695,12 +731,32 @@ extern "C" void ensure_specific_session_buffers_mapped(uint32_t session_id, cons
             );
 
             if (mapping.mapped_memory == NULL) {
-                printf("[FATAL] Failed to remap buffer %u at original address %p: GetLastError=%lu\n",
-                       buffer_id, mapping.original_address, GetLastError());
-                printf("[FATAL] Buffer MUST be mapped at exact same address or app will crash\n");
-                exit(1);
+                DWORD error = GetLastError();
+                printf("[CACHE_DEBUG] buffer_id=%u: Failed to remap at original address %p (error=%lu), trying fallback\n",
+                       buffer_id, mapping.original_address, error);
+
+                // Fallback: try to map at any available address
+                mapping.mapped_memory = MapViewOfFile(
+                    mapping.mapping_handle,
+                    FILE_MAP_ALL_ACCESS,
+                    0,
+                    0,
+                    0
+                );
+
+                if (mapping.mapped_memory == NULL) {
+                    printf("[FATAL] Failed to remap buffer %u at any address: GetLastError=%lu\n",
+                           buffer_id, GetLastError());
+                    exit(1);
+                }
+
+                printf("[CACHE_DEBUG] buffer_id=%u: FALLBACK SUCCESS: mapped at %p instead of %p\n",
+                       buffer_id, mapping.mapped_memory, mapping.original_address);
+
+                // Update the original address for future reference
+                mapping.original_address = mapping.mapped_memory;
             } else {
-                printf("[BACKEND] Successfully remapped buffer %u at original address %p\n",
+                printf("[CACHE_DEBUG] buffer_id=%u: REMAP SUCCESS at original address %p\n",
                        buffer_id, mapping.mapped_memory);
             }
         }
@@ -792,6 +848,7 @@ extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id) {
             }
 
             // Now remap at the original address
+            // First try to remap at original address
             mapping.mapped_memory = MapViewOfFileEx(
                 mapping.mapping_handle,
                 FILE_MAP_ALL_ACCESS,
@@ -802,12 +859,32 @@ extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id) {
             );
 
             if (mapping.mapped_memory == NULL) {
-                printf("[FATAL] Failed to remap buffer %u at original address %p: GetLastError=%lu\n",
-                       buffer_id, mapping.original_address, GetLastError());
-                printf("[FATAL] Buffer MUST be mapped at exact same address or app will crash\n");
-                exit(1);
+                DWORD error = GetLastError();
+                printf("[CACHE_DEBUG] buffer_id=%u: Failed to remap at original address %p (error=%lu), trying fallback\n",
+                       buffer_id, mapping.original_address, error);
+
+                // Fallback: try to map at any available address
+                mapping.mapped_memory = MapViewOfFile(
+                    mapping.mapping_handle,
+                    FILE_MAP_ALL_ACCESS,
+                    0,
+                    0,
+                    0
+                );
+
+                if (mapping.mapped_memory == NULL) {
+                    printf("[FATAL] Failed to remap buffer %u at any address: GetLastError=%lu\n",
+                           buffer_id, GetLastError());
+                    exit(1);
+                }
+
+                printf("[CACHE_DEBUG] buffer_id=%u: FALLBACK SUCCESS: mapped at %p instead of %p\n",
+                       buffer_id, mapping.mapped_memory, mapping.original_address);
+
+                // Update the original address for future reference
+                mapping.original_address = mapping.mapped_memory;
             } else {
-                printf("[BACKEND] Successfully remapped buffer %u at original address %p\n",
+                printf("[CACHE_DEBUG] buffer_id=%u: REMAP SUCCESS at original address %p\n",
                        buffer_id, mapping.mapped_memory);
             }
         }

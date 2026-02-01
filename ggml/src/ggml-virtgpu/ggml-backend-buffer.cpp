@@ -15,10 +15,13 @@ static uint32_t simple_checksum(const void * data, size_t size) {
 }
 
 #define GUEST_CHECKSUM 1
+#define VERIFY_SET_TENSOR_CACHE_COHERENCY 1
 
 #if GUEST_CHECKSUM == 1
 // Static IDs for matching guest/host operations
+#if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
 static uint32_t buffer_set_tensor_id = 0;
+#endif
 static uint32_t buffer_get_tensor_id = 0;
 #endif
 
@@ -38,19 +41,27 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
                                                     const void *          data,
                                                     size_t                offset,
                                                     size_t                size) {
-#if GUEST_CHECKSUM == 1
-    virtgpu * gpu = BUFFER_TO_GPU(buffer);
-#endif
     ggml_backend_remoting_buffer_context * context = BUFFER_TO_GGML_CONTEXT(buffer);
 
     if (context->is_from_ptr) {
-#if GUEST_CHECKSUM == 1
+        // Simple operation: just write data to shared buffer
+        memcpy((char *) tensor->data + offset, data, size);
+
+        // Simple diagnostic to confirm set_tensor is being called
+        static uint32_t set_tensor_count = 0;
+        set_tensor_count++;
+        if (set_tensor_count <= 3) {
+            uint32_t checksum = simple_checksum(data, size);
+            printf("[SET_DIAG] set_tensor #%u: writing checksum=0x%08x size=%zu to tensor=%p+%zu\n",
+                   set_tensor_count, checksum, size, tensor->data, offset);
+        }
+
+#if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
+        virtgpu * gpu = BUFFER_TO_GPU(buffer);
+
         // Assign static ID for matching
         uint32_t operation_id = ++buffer_set_tensor_id;
-#endif
-        // 1. Call the memcpy (normal operation)
-        memcpy((char *) tensor->data + offset, data, size);
-#if GUEST_CHECKSUM == 1
+
         // 2. Show checksum of the data written
         uint32_t checksum = simple_checksum(data, size);
 
@@ -163,9 +174,20 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
 
         // 1. Call the memcpy (normal operation)
         memcpy(data, (const char *) tensor->data + offset, size);
+
+        // Simple checksum diagnostic (independent of GUEST_CHECKSUM)
+        uint32_t buffer_checksum = simple_checksum((const char *) tensor->data + offset, size);
+        uint32_t data_checksum = simple_checksum(data, size);
+
+        static uint32_t get_tensor_count = 0;
+        get_tensor_count++;
+
+        if (get_tensor_count <= 5) {  // Only show first few for debugging
+            printf("[GET_DIAG] get_tensor #%u: buffer_checksum=0x%08x data_checksum=0x%08x size=%zu\n",
+                   get_tensor_count, buffer_checksum, data_checksum, size);
+        }
 #if GUEST_CHECKSUM == 1
         // 2. Show checksum of the data read (should match buffer data)
-        uint32_t data_checksum = simple_checksum(data, size);
         printf("GUEST #%u res_id=%u get_tensor: offset=%zu size=%zu buffer_checksum=0x%08x data_checksum=0x%08x\n",
                operation_id, res_id, offset, size, guest_checksum, data_checksum);
 #endif

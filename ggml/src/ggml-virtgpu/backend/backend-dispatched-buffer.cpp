@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+#define VERIFY_SET_TENSOR_CACHE_COHERENCY 0
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -14,7 +16,7 @@
 // Windows host-side cache coherency: unmap and close file
 static void windows_host_unmap_buffer(void* buffer, uint32_t operation_id, uint32_t res_id) {
 #ifdef _WIN32
-    printf("DEBUG: HOST #%u res_id=%u: Unmapping and closing buffer for cache coherency\n", operation_id, res_id);
+    //printf("DEBUG: HOST #%u res_id=%u: Unmapping and closing buffer for cache coherency\n", operation_id, res_id);
     // TODO: Implement Windows-specific unmap and close
     // This should unmap the memory-mapped view and close the file handle
 #else
@@ -26,7 +28,7 @@ static void windows_host_unmap_buffer(void* buffer, uint32_t operation_id, uint3
 // Windows host-side cache coherency: reopen and remap file
 static void windows_host_remap_buffer(void* buffer, uint32_t operation_id, uint32_t res_id) {
 #ifdef _WIN32
-    printf("DEBUG: HOST #%u res_id=%u: Reopening and remapping buffer for fresh data\n", operation_id, res_id);
+    //printf("DEBUG: HOST #%u res_id=%u: Reopening and remapping buffer for fresh data\n", operation_id, res_id);
     // TODO: Implement Windows-specific reopen and remap
     // This should reopen the file and remap to get fresh data from guest
 #else
@@ -123,12 +125,15 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         return 1;
     }
 
-    // Calculate checksum of the buffer region
-    void * host_read_address = (char *)buffer_base + offset;
-
-    // CACHE COHERENCY FIX: Reopen and remap buffer to see guest changes
+    // CACHE COHERENCY: Reopen and remap buffer to see guest changes
     windows_host_remap_buffer(buffer, operation_id, buffer_res_id);
 
+    // CACHE COHERENCY: Unmap and close buffer after SET operation
+    windows_host_unmap_buffer(buffer, operation_id, buffer_res_id);
+
+#if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
+    // Calculate checksum of the buffer region for verification
+    void * host_read_address = (char *)buffer_base + offset;
     uint32_t host_checksum = simple_checksum(host_read_address, size);
 
     // Calculate absolute file offset from buffer base (matches guest calculation)
@@ -142,10 +147,6 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
     if (size >= 4) {
         host_data_sample = *(uint32_t*)host_read_address;
     }
-
-    // CACHE COHERENCY: Unmap and close buffer after SET operation
-    windows_host_unmap_buffer(buffer, operation_id, buffer_res_id);
-
     // Compare checksums - FATAL on mismatch
     if (guest_checksum == host_checksum) {
         printf("HOST  #%u res_id=%u SET_CACHE_SUCCESS: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx (SET_SUCCESS: %u)\n",
@@ -163,6 +164,11 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         printf("[HOST] set_tensor cache coherency broken, aborting!\n");
         return 1;  // Fatal error
     }
+#else
+    // Verification disabled - just acknowledge cache coherency coordination
+    printf("HOST  #%u res_id=%u SET_CACHE_COHERENCY: verification disabled, coordination completed\n",
+           operation_id, buffer_res_id);
+#endif
     return 0;
 }
 

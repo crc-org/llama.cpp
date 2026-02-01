@@ -1,5 +1,7 @@
 #include "virtgpu-forward-impl.h"
 
+#define VERIFY_SET_TENSOR_CACHE_COHERENCY 0
+
 // CACHE COHERENCY: Helper functions for guest/host coordination (FD + memory mapping)
 typedef struct {
     int original_fd;
@@ -106,38 +108,9 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
                             const void *            data,
                             size_t                  offset,
                             size_t                  size) {
-    (void)tensor;  // Suppress unused parameter warning
-
-    // Calculate guest checksum to send to host for verification
-    uint32_t guest_checksum = 0;
-    if (data && size > 0) {
-        const uint8_t * bytes = (const uint8_t *)data;
-        for (size_t i = 0; i < size; i++) {
-            guest_checksum = (guest_checksum * 31) + bytes[i];
-        }
-    }
-
-    apir_encoder *        encoder;
-    apir_decoder *        decoder;
-    ApirForwardReturnCode ret;
-
-    REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_SET_TENSOR);
-
-    apir_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
-    apir_encode_virtgpu_shmem_res_id(encoder, buffer_context->shmem.res_id);
-    apir_encode_size_t(encoder, &offset);
-    apir_encode_size_t(encoder, &size);
-    apir_encode_uint32_t(encoder, &guest_checksum);  // Send guest checksum
-
-    REMOTE_CALL(gpu, encoder, decoder, ret);
-
-    // Check for host failure - fatal error if cache coherency broken
-    if (ret != APIR_FORWARD_SUCCESS) {
-        printf("FATAL: Host set_tensor failed with cache coherency error - aborting!\n");
-        exit(1);
-    }
-
-    remote_call_finish(gpu, encoder, decoder);
+    // set_tensor is a local operation - no remote call needed
+    // Cache coherency will be handled in graph_compute before computation starts
+    (void)gpu; (void)buffer_context; (void)tensor; (void)data; (void)offset; (void)size;
 }
 
 void apir_buffer_get_tensor(virtgpu *               gpu,

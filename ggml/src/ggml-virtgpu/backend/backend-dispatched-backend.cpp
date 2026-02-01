@@ -19,6 +19,7 @@ extern "C" void unmap_all_session_buffers(uint32_t session_id);
 extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id);
 extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
 extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
+extern "C" void flush_specific_session_buffers(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
 
 #ifdef CHECKSUM_CGRAPH_BUFFERS
 // Simple checksum for data verification
@@ -76,35 +77,52 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
            host_graph_compute_counter, cgraph->n_nodes);
 #endif
 
-    // Extract unique buffer handles from decoded graph tensors for cache coherency
-    std::unordered_set<uint64_t> buffer_handles_set;
+    // Extract unique buffer res_ids from decoded graph tensors for cache coherency
+    std::unordered_set<uint64_t> buffer_res_ids_set;
 
     // Process all nodes in the graph
     for (int i = 0; i < cgraph->n_nodes; i++) {
         ggml_tensor * node = cgraph->nodes[i];
         if (node->buffer) {
-            // Convert ggml_backend_buffer_t to buffer handle/ID
-            uint64_t buffer_handle = (uint64_t)(uintptr_t)node->buffer;
-            buffer_handles_set.insert(buffer_handle);
+            // Convert ggml_backend_buffer_t to res_id
+            uint32_t res_id = apir_get_buffer_res_id(node->buffer);
+            if (res_id != 0) {
+                buffer_res_ids_set.insert(res_id);
+            } else {
+                printf("[BUFFER_DEBUG] WARNING: Node %d buffer %p has no res_id mapping\n", i, (void*)node->buffer);
+            }
         }
 
         // Also check source tensors
         for (int j = 0; j < GGML_MAX_SRC && node->src[j]; j++) {
             if (node->src[j]->buffer) {
-                uint64_t buffer_handle = (uint64_t)(uintptr_t)node->src[j]->buffer;
-                buffer_handles_set.insert(buffer_handle);
+                uint32_t res_id = apir_get_buffer_res_id(node->src[j]->buffer);
+                if (res_id != 0) {
+                    buffer_res_ids_set.insert(res_id);
+                } else {
+                    printf("[BUFFER_DEBUG] WARNING: Node %d src[%d] buffer %p has no res_id mapping\n", i, j, (void*)node->src[j]->buffer);
+                }
             }
         }
 
         // Check view source
         if (node->view_src && node->view_src->buffer) {
-            uint64_t buffer_handle = (uint64_t)(uintptr_t)node->view_src->buffer;
-            buffer_handles_set.insert(buffer_handle);
+            uint32_t res_id = apir_get_buffer_res_id(node->view_src->buffer);
+            if (res_id != 0) {
+                buffer_res_ids_set.insert(res_id);
+            } else {
+                printf("[BUFFER_DEBUG] WARNING: Node %d view_src buffer %p has no res_id mapping\n", i, (void*)node->view_src->buffer);
+            }
         }
     }
 
     // Convert to array for passing to C functions
-    std::vector<uint64_t> buffer_handles(buffer_handles_set.begin(), buffer_handles_set.end());
+    std::vector<uint64_t> buffer_res_ids(buffer_res_ids_set.begin(), buffer_res_ids_set.end());
+
+    printf("[BUFFER_DEBUG] Graph compute cache coherency will process %zu unique buffers\n", buffer_res_ids.size());
+    for (size_t i = 0; i < buffer_res_ids.size(); i++) {
+        printf("[BUFFER_DEBUG] Buffer %zu: res_id=%llu\n", i, buffer_res_ids[i]);
+    }
 
     ggml_status status;
 #if APIR_BACKEND_CHECK_SUPPORTS_OP == 1
@@ -122,8 +140,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // CACHE COHERENCY: Guest/Host file handoff - close host FDs and reopen fresh ones
-    close_and_reopen_specific_session_files(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
+    // CACHE COHERENCY: Flush all buffers before computation so host sees guest writes
+    printf("[CACHE_DEBUG] Flushing %zu buffers before computation\n", buffer_res_ids.size());
+    flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
 #ifdef CHECKSUM_CGRAPH_BUFFERS
     // Extract unique buffers, sorted (needed for checksums)
@@ -175,6 +194,10 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
         bck->iface.synchronize(bck);
     }
 
+    // CACHE COHERENCY: Unmap buffers after computation to clean up and flush results
+    printf("[CACHE_DEBUG] Unmapping %zu buffers after computation\n", buffer_res_ids.size());
+    close_specific_session_files_for_guest(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
+
 #ifdef CHECKSUM_CGRAPH_BUFFERS
     // Calculate checksums after computation (same sorted buffers)
     printf("HOST #%u: Buffer checksums after computation:\n", host_graph_compute_counter);
@@ -192,8 +215,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // CACHE COHERENCY: Close host FDs to flush results back to guest
-    close_specific_session_files_for_guest(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
+    // CACHE COHERENCY: Flush buffers after computation so guest sees host results
+    printf("[CACHE_DEBUG] Flushing %zu buffers after computation\n", buffer_res_ids.size());
+    flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
     apir_encode_ggml_status(enc, &status);
 
