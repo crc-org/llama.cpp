@@ -11,8 +11,8 @@
 #include <vector>
 #include <algorithm>
 
-// Uncomment to enable checksum debugging
-//#define CHECKSUM_CGRAPH_BUFFERS
+// Enable checksum debugging for cache coherency verification
+#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External functions for buffer management (defined in main.cpp)
 extern "C" void unmap_all_session_buffers(uint32_t session_id);
@@ -88,8 +88,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
             uint32_t res_id = apir_get_buffer_res_id(node->buffer);
             if (res_id != 0) {
                 buffer_res_ids_set.insert(res_id);
-            } else {
-                printf("[BUFFER_DEBUG] WARNING: Node %d buffer %p has no res_id mapping\n", i, (void*)node->buffer);
             }
         }
 
@@ -99,8 +97,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
                 uint32_t res_id = apir_get_buffer_res_id(node->src[j]->buffer);
                 if (res_id != 0) {
                     buffer_res_ids_set.insert(res_id);
-                } else {
-                    printf("[BUFFER_DEBUG] WARNING: Node %d src[%d] buffer %p has no res_id mapping\n", i, j, (void*)node->src[j]->buffer);
                 }
             }
         }
@@ -110,8 +106,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
             uint32_t res_id = apir_get_buffer_res_id(node->view_src->buffer);
             if (res_id != 0) {
                 buffer_res_ids_set.insert(res_id);
-            } else {
-                printf("[BUFFER_DEBUG] WARNING: Node %d view_src buffer %p has no res_id mapping\n", i, (void*)node->view_src->buffer);
             }
         }
     }
@@ -119,10 +113,7 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     // Convert to array for passing to C functions
     std::vector<uint64_t> buffer_res_ids(buffer_res_ids_set.begin(), buffer_res_ids_set.end());
 
-    printf("[BUFFER_DEBUG] Graph compute cache coherency will process %zu unique buffers\n", buffer_res_ids.size());
-    for (size_t i = 0; i < buffer_res_ids.size(); i++) {
-        printf("[BUFFER_DEBUG] Buffer %zu: res_id=%llu\n", i, buffer_res_ids[i]);
-    }
+    // printf("[CACHE] Processing %zu buffers\n", buffer_res_ids.size());
 
     ggml_status status;
 #if APIR_BACKEND_CHECK_SUPPORTS_OP == 1
@@ -141,7 +132,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 #endif
 
     // CACHE COHERENCY: Flush all buffers before computation so host sees guest writes
-    printf("[CACHE_DEBUG] Flushing %zu buffers before computation\n", buffer_res_ids.size());
     flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
 #ifdef CHECKSUM_CGRAPH_BUFFERS
@@ -170,8 +160,7 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     });
 
     // Calculate checksums before computation
-    printf("HOST #%u: Buffer checksums before computation (%zu unique buffers):\n",
-           host_graph_compute_counter, unique_buffers.size());
+    printf("[HOST_BEFORE] Buffers before computation:\n");
 
     for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
         ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
@@ -181,8 +170,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
         if (buffer_data && buffer_size > 0) {
             uint32_t checksum = simple_checksum(buffer_data, buffer_size);
-            printf("HOST #%u: Buffer %zu checksum before: 0x%08x\n",
-                   host_graph_compute_counter, buffer_index, checksum);
+            uint32_t res_id = apir_get_buffer_res_id(buffer);
+            printf("[HOST_BEFORE] res_id=%u: checksum=0x%08x size=%zu\n",
+                   res_id, checksum, buffer_size);
         }
     }
 #endif
@@ -194,13 +184,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
         bck->iface.synchronize(bck);
     }
 
-    // CACHE COHERENCY: Unmap buffers after computation to clean up and flush results
-    printf("[CACHE_DEBUG] Unmapping %zu buffers after computation\n", buffer_res_ids.size());
-    close_specific_session_files_for_guest(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
-
 #ifdef CHECKSUM_CGRAPH_BUFFERS
     // Calculate checksums after computation (same sorted buffers)
-    printf("HOST #%u: Buffer checksums after computation:\n", host_graph_compute_counter);
+    printf("\n[HOST_AFTER] Buffers after computation:\n");
     for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
         ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
 
@@ -209,14 +195,17 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
         if (buffer_data && buffer_size > 0) {
             uint32_t checksum = simple_checksum(buffer_data, buffer_size);
-            printf("HOST #%u: Buffer %zu checksum after:  0x%08x\n",
-                   host_graph_compute_counter, buffer_index, checksum);
+            uint32_t res_id = apir_get_buffer_res_id(buffer);
+            printf("[HOST_AFTER] res_id=%u: checksum=0x%08x size=%zu\n",
+                   res_id, checksum, buffer_size);
         }
     }
 #endif
 
+    // CACHE COHERENCY: Clean up buffers after checksums are complete
+    close_specific_session_files_for_guest(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
+
     // CACHE COHERENCY: Flush buffers after computation so guest sees host results
-    printf("[CACHE_DEBUG] Flushing %zu buffers after computation\n", buffer_res_ids.size());
     flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
     apir_encode_ggml_status(enc, &status);

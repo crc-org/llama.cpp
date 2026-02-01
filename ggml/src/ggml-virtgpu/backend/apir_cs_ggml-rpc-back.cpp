@@ -17,7 +17,6 @@ void apir_track_backend_buffer(ggml_backend_buffer_t buffer) {
 void apir_track_backend_buffer_with_res_id(ggml_backend_buffer_t buffer, uint32_t res_id) {
     backend_buffers.insert(buffer);
     buffer_to_res_id[buffer] = res_id;
-    printf("[BUFFER_DEBUG] Tracking buffer %p -> res_id %u\n", (void*)buffer, res_id);
 }
 
 bool apir_untrack_backend_buffer(ggml_backend_buffer_t buffer) {

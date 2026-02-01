@@ -9,6 +9,23 @@
 #include <cctype>
 #include <string>
 #include <vector>
+#include <unordered_set>
+#include <algorithm>
+
+// Enable checksum debugging for CPU backend comparison
+#define CHECKSUM_CPU_BUFFERS
+
+#ifdef CHECKSUM_CPU_BUFFERS
+// Simple checksum for data verification (same as VirtGPU backend)
+static uint32_t simple_checksum(const void * data, size_t size) {
+    const uint8_t * bytes = (const uint8_t *)data;
+    uint32_t checksum = 0;
+    for (size_t i = 0; i < size; i++) {
+        checksum = (checksum * 31) + bytes[i];
+    }
+    return checksum;
+}
+#endif
 
 #ifdef GGML_USE_CPU_HBM
 #    include "hbm.h"
@@ -183,7 +200,67 @@ static enum ggml_status ggml_backend_cpu_graph_compute(ggml_backend_t backend, s
     cplan.abort_callback      = cpu_ctx->abort_callback;
     cplan.abort_callback_data = cpu_ctx->abort_callback_data;
 
-    return ggml_graph_compute(cgraph, &cplan);
+#ifdef CHECKSUM_CPU_BUFFERS
+    // Extract unique buffers from cgraph for checksum computation
+    std::unordered_set<ggml_backend_buffer_t> buffer_set;
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        ggml_tensor * node = cgraph->nodes[i];
+        if (node->buffer) {
+            buffer_set.insert(node->buffer);
+        }
+        // Also check source tensors
+        for (int j = 0; j < GGML_MAX_SRC && node->src[j]; j++) {
+            if (node->src[j]->buffer) {
+                buffer_set.insert(node->src[j]->buffer);
+            }
+        }
+        if (node->view_src && node->view_src->buffer) {
+            buffer_set.insert(node->view_src->buffer);
+        }
+    }
+
+    // Convert to vector and sort by buffer size for consistent ordering
+    std::vector<ggml_backend_buffer_t> unique_buffers(buffer_set.begin(), buffer_set.end());
+    std::sort(unique_buffers.begin(), unique_buffers.end(), [](const ggml_backend_buffer_t a, const ggml_backend_buffer_t b) {
+        return ggml_backend_buffer_get_size(a) < ggml_backend_buffer_get_size(b);
+    });
+
+    // Calculate checksums before computation
+    printf("[CPU_BEFORE] Buffers before computation:\n");
+    for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
+        ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
+
+        void * buffer_data = ggml_backend_buffer_get_base(buffer);
+        size_t buffer_size = ggml_backend_buffer_get_size(buffer);
+
+        if (buffer_data && buffer_size > 0) {
+            uint32_t checksum = simple_checksum(buffer_data, buffer_size);
+            printf("[CPU_BEFORE] Buffer %zu: checksum=0x%08x size=%zu\n",
+                   buffer_index, checksum, buffer_size);
+        }
+    }
+#endif
+
+    enum ggml_status status = ggml_graph_compute(cgraph, &cplan);
+
+#ifdef CHECKSUM_CPU_BUFFERS
+    // Calculate checksums after computation (same sorted buffers)
+    printf("\n[CPU_AFTER] Buffers after computation:\n");
+    for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
+        ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
+
+        void * buffer_data = ggml_backend_buffer_get_base(buffer);
+        size_t buffer_size = ggml_backend_buffer_get_size(buffer);
+
+        if (buffer_data && buffer_size > 0) {
+            uint32_t checksum = simple_checksum(buffer_data, buffer_size);
+            printf("[CPU_AFTER] Buffer %zu: checksum=0x%08x size=%zu\n",
+                   buffer_index, checksum, buffer_size);
+        }
+    }
+#endif
+
+    return status;
 }
 
 static const struct ggml_backend_i ggml_backend_cpu_i = {

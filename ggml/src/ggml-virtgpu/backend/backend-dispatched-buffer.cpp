@@ -233,8 +233,8 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
     // Calculate absolute file offset from buffer base (matches guest calculation)
     size_t host_file_offset = (char *)host_read_address - (char *)buffer_base;
 
-    printf("HOST  #%u res_id=%u GET_VALIDATION: buffer_base=%p read_addr=%p offset=%zu host_file_offset=0x%zx\n",
-           operation_id, buffer_res_id, buffer_base, host_read_address, offset, host_file_offset);
+    // printf("HOST  #%u res_id=%u GET_VALIDATION: buffer_base=%p read_addr=%p offset=%zu host_file_offset=0x%zx\n",
+    //        operation_id, buffer_res_id, buffer_base, host_read_address, offset, host_file_offset);
 
     // Show first few bytes of buffer data for debugging
     uint32_t host_data_sample = 0;
@@ -247,19 +247,19 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
 
     // Compare checksums - FATAL on mismatch
     if (guest_checksum == host_checksum) {
-        printf("HOST  #%u res_id=%u GET_CACHE_SUCCESS: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx (GET_SUCCESS: %u)\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset,
-               ++get_success_count);
+        printf("[HOST_GET] res_id=%u SUCCESS: guest=0x%08x host=0x%08x offset=0x%zx size=%zu\n",
+               buffer_res_id, guest_checksum, host_checksum, offset, size);
+        ++get_success_count;
     } else {
-        printf("HOST  #%u res_id=%u GET_CACHE_FAILURE: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx - FATAL!\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset);
+        printf("[HOST_GET] res_id=%u FAILURE: guest=0x%08x host=0x%08x offset=0x%zx size=%zu\n",
+               buffer_res_id, guest_checksum, host_checksum, offset, size);
 
         if (host_checksum == 0x00000000) {
-            printf("HOST  #%u res_id=%u NOTE: Host buffer contains all zeros - cache coherency broken!\n",
-                   operation_id, buffer_res_id);
+            printf("[HOST_GET] res_id=%u NOTE: Host sees all zeros - cache coherency broken!\n",
+                   buffer_res_id);
         }
 
-        printf("[HOST] get_tensor cache coherency broken, aborting!\n");
+        printf("[HOST_GET] Cache coherency failure, aborting!\n");
         return 1;  // Fatal error
     }
     return 0;
