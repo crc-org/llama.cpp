@@ -3,6 +3,10 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+#include <algorithm>
+
+// Uncomment to enable checksum debugging
+//#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External function for guest-side cache coherency
 extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
@@ -17,6 +21,18 @@ extern "C" void close_specific_session_files_for_guest(uint32_t session_id, cons
 
 // Track original pointers for remapping
 static std::unordered_map<virtgpu_shmem *, void *> original_ptrs;
+
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+// Simple checksum for data verification
+static uint32_t simple_checksum(const void * data, size_t size) {
+    const uint8_t * bytes = (const uint8_t *)data;
+    uint32_t checksum = 0;
+    for (size_t i = 0; i < size; i++) {
+        checksum = (checksum * 31) + bytes[i];
+    }
+    return checksum;
+}
+#endif
 
 // Step 2: Unmap all buffers for host access
 static void unmap_graph_buffers_for_host(const std::vector<virtgpu_shmem *> & shmems) {
@@ -45,7 +61,7 @@ static long long current_time_ms() {
     return (long long) ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-// Step 1: Find all unique buffer shmems involved in the graph
+// Step 1: Find all unique buffer shmems involved in the graph (sorted for consistent ordering)
 static std::vector<virtgpu_shmem *> find_graph_buffer_shmems(ggml_cgraph * cgraph) {
     std::unordered_set<virtgpu_shmem *> shmem_set;
 
@@ -68,7 +84,12 @@ static std::vector<virtgpu_shmem *> find_graph_buffer_shmems(ggml_cgraph * cgrap
         }
     }
 
-    return std::vector<virtgpu_shmem *>(shmem_set.begin(), shmem_set.end());
+    // Convert to vector and sort by buffer size for consistent ordering with host
+    std::vector<virtgpu_shmem *> result(shmem_set.begin(), shmem_set.end());
+    std::sort(result.begin(), result.end(), [](const virtgpu_shmem * a, const virtgpu_shmem * b) {
+        return a->mmap_size < b->mmap_size;
+    });
+    return result;
 }
 
 // These functions are replaced by the simplified versions above
@@ -84,6 +105,22 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     // Step 1: Find all unique buffer shmems involved in the graph
     std::vector<virtgpu_shmem *> buffer_shmems = find_graph_buffer_shmems(cgraph);
+
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+    printf("GUEST #%u: Processing cgraph with %d nodes, %zu buffers\n",
+           guest_graph_compute_counter, cgraph->n_nodes, buffer_shmems.size());
+
+    // Calculate checksums before processing (buffer level)
+    printf("GUEST #%u: Buffer checksums before processing:\n", guest_graph_compute_counter);
+    for (size_t i = 0; i < buffer_shmems.size(); i++) {
+        virtgpu_shmem * shmem = buffer_shmems[i];
+        if (shmem && shmem->mmap_ptr && shmem->mmap_size > 0) {
+            uint32_t checksum = simple_checksum(shmem->mmap_ptr, shmem->mmap_size);
+            printf("GUEST #%u: Buffer %zu checksum before: 0x%08x\n",
+                   guest_graph_compute_counter, i, checksum);
+        }
+    }
+#endif
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE);
 
@@ -131,6 +168,19 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     // Step 3: Remap all buffers after host processing (see host changes)
     remap_graph_buffers_after_host(buffer_shmems);
+
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+    // Calculate checksums after processing (buffer level)
+    printf("GUEST #%u: Buffer checksums after processing:\n", guest_graph_compute_counter);
+    for (size_t i = 0; i < buffer_shmems.size(); i++) {
+        virtgpu_shmem * shmem = buffer_shmems[i];
+        if (shmem && shmem->mmap_ptr && shmem->mmap_size > 0) {
+            uint32_t checksum = simple_checksum(shmem->mmap_ptr, shmem->mmap_size);
+            printf("GUEST #%u: Buffer %zu checksum after:  0x%08x\n",
+                   guest_graph_compute_counter, i, checksum);
+        }
+    }
+#endif
 
     // Unlock mutex before cleanup
     if (using_shared_shmem) {

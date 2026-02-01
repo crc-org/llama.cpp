@@ -9,12 +9,28 @@
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
+#include <algorithm>
+
+// Uncomment to enable checksum debugging
+//#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External functions for buffer management (defined in main.cpp)
 extern "C" void unmap_all_session_buffers(uint32_t session_id);
 extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id);
 extern "C" void close_and_reopen_specific_session_files(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
 extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
+
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+// Simple checksum for data verification
+static uint32_t simple_checksum(const void * data, size_t size) {
+    const uint8_t * bytes = (const uint8_t *)data;
+    uint32_t checksum = 0;
+    for (size_t i = 0; i < size; i++) {
+        checksum = (checksum * 31) + bytes[i];
+    }
+    return checksum;
+}
+#endif
 
 uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(enc);
@@ -55,6 +71,10 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
                host_graph_compute_counter);
         return 1;
     }
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+    printf("HOST #%u: Processing cgraph with %d nodes\n",
+           host_graph_compute_counter, cgraph->n_nodes);
+#endif
 
     // Extract unique buffer handles from decoded graph tensors for cache coherency
     std::unordered_set<uint64_t> buffer_handles_set;
@@ -105,12 +125,72 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     // CACHE COHERENCY: Guest/Host file handoff - close host FDs and reopen fresh ones
     close_and_reopen_specific_session_files(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
 
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+    // Extract unique buffers, sorted (needed for checksums)
+    std::unordered_set<ggml_backend_buffer_t> buffer_set;
+    for (int i = 0; i < cgraph->n_nodes; i++) {
+        ggml_tensor * node = cgraph->nodes[i];
+        if (node->buffer) {
+            buffer_set.insert(node->buffer);
+        }
+        // Also check source tensors
+        for (int j = 0; j < GGML_MAX_SRC && node->src[j]; j++) {
+            if (node->src[j]->buffer) {
+                buffer_set.insert(node->src[j]->buffer);
+            }
+        }
+        if (node->view_src && node->view_src->buffer) {
+            buffer_set.insert(node->view_src->buffer);
+        }
+    }
+
+    // Convert to vector and sort by buffer size for consistent ordering with guest
+    std::vector<ggml_backend_buffer_t> unique_buffers(buffer_set.begin(), buffer_set.end());
+    std::sort(unique_buffers.begin(), unique_buffers.end(), [](const ggml_backend_buffer_t a, const ggml_backend_buffer_t b) {
+        return ggml_backend_buffer_get_size(a) < ggml_backend_buffer_get_size(b);
+    });
+
+    // Calculate checksums before computation
+    printf("HOST #%u: Buffer checksums before computation (%zu unique buffers):\n",
+           host_graph_compute_counter, unique_buffers.size());
+
+    for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
+        ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
+
+        void * buffer_data = ggml_backend_buffer_get_base(buffer);
+        size_t buffer_size = ggml_backend_buffer_get_size(buffer);
+
+        if (buffer_data && buffer_size > 0) {
+            uint32_t checksum = simple_checksum(buffer_data, buffer_size);
+            printf("HOST #%u: Buffer %zu checksum before: 0x%08x\n",
+                   host_graph_compute_counter, buffer_index, checksum);
+        }
+    }
+#endif
+
     // Run the actual computation
     status = bck->iface.graph_compute(bck, cgraph);
 
     if (async_backend) {
         bck->iface.synchronize(bck);
     }
+
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+    // Calculate checksums after computation (same sorted buffers)
+    printf("HOST #%u: Buffer checksums after computation:\n", host_graph_compute_counter);
+    for (size_t buffer_index = 0; buffer_index < unique_buffers.size(); buffer_index++) {
+        ggml_backend_buffer_t buffer = unique_buffers[buffer_index];
+
+        void * buffer_data = ggml_backend_buffer_get_base(buffer);
+        size_t buffer_size = ggml_backend_buffer_get_size(buffer);
+
+        if (buffer_data && buffer_size > 0) {
+            uint32_t checksum = simple_checksum(buffer_data, buffer_size);
+            printf("HOST #%u: Buffer %zu checksum after:  0x%08x\n",
+                   host_graph_compute_counter, buffer_index, checksum);
+        }
+    }
+#endif
 
     // CACHE COHERENCY: Close host FDs to flush results back to guest
     close_specific_session_files_for_guest(ctx->ctx_id, buffer_handles.data(), buffer_handles.size());
@@ -119,5 +199,3 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     return 0;
 }
-
-
