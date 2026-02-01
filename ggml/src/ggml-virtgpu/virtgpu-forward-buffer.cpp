@@ -131,6 +131,12 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
+    // Check for host failure - fatal error if cache coherency broken
+    if (ret != APIR_FORWARD_SUCCESS) {
+        printf("FATAL: Host set_tensor failed with cache coherency error - aborting!\n");
+        exit(1);
+    }
+
     remote_call_finish(gpu, encoder, decoder);
 }
 
@@ -157,6 +163,12 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
     apir_encode_uint32_t(encoder, &guest_checksum);  // Send guest checksum
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
+
+    // Check for host failure - fatal error if cache coherency broken
+    if (ret != APIR_FORWARD_SUCCESS) {
+        printf("FATAL: Host get_tensor failed with cache coherency error - aborting!\n");
+        exit(1);
+    }
 
     remote_call_finish(gpu, encoder, decoder);
 }

@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#define DEBUG_CACHE_COHERENCY 1
+#define DEBUG_CACHE_COHERENCY 0
 
 // Local definition to avoid include conflicts - matches virtgpu-interface.h
 typedef struct {

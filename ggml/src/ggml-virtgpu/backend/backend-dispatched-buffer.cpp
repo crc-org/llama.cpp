@@ -7,6 +7,34 @@
 
 #include <cstdint>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// Windows host-side cache coherency: unmap and close file
+static void windows_host_unmap_buffer(void* buffer, uint32_t operation_id, uint32_t res_id) {
+#ifdef _WIN32
+    printf("DEBUG: HOST #%u res_id=%u: Unmapping and closing buffer for cache coherency\n", operation_id, res_id);
+    // TODO: Implement Windows-specific unmap and close
+    // This should unmap the memory-mapped view and close the file handle
+#else
+    (void)buffer; (void)operation_id; (void)res_id;
+    printf("DEBUG: HOST #%u res_id=%u: Buffer unmap skipped (non-Windows)\n", operation_id, res_id);
+#endif
+}
+
+// Windows host-side cache coherency: reopen and remap file
+static void windows_host_remap_buffer(void* buffer, uint32_t operation_id, uint32_t res_id) {
+#ifdef _WIN32
+    printf("DEBUG: HOST #%u res_id=%u: Reopening and remapping buffer for fresh data\n", operation_id, res_id);
+    // TODO: Implement Windows-specific reopen and remap
+    // This should reopen the file and remap to get fresh data from guest
+#else
+    (void)buffer; (void)operation_id; (void)res_id;
+    printf("DEBUG: HOST #%u res_id=%u: Buffer remap skipped (non-Windows)\n", operation_id, res_id);
+#endif
+}
+
 // Simple checksum for data verification
 static uint32_t simple_checksum(const void * data, size_t size) {
     const uint8_t * bytes = (const uint8_t *)data;
@@ -96,34 +124,45 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
     }
 
     // Calculate checksum of the buffer region
-    uint32_t host_checksum = simple_checksum((char *)buffer_base + offset, size);
+    void * host_read_address = (char *)buffer_base + offset;
 
-    // Compare checksums and update counters
+    // CACHE COHERENCY FIX: Reopen and remap buffer to see guest changes
+    windows_host_remap_buffer(buffer, operation_id, buffer_res_id);
+
+    uint32_t host_checksum = simple_checksum(host_read_address, size);
+
+    // Calculate absolute file offset from buffer base (matches guest calculation)
+    size_t host_file_offset = (char *)host_read_address - (char *)buffer_base;
+
+    printf("HOST  #%u res_id=%u SET_VALIDATION: buffer_base=%p read_addr=%p offset=%zu host_file_offset=0x%zx\n",
+           operation_id, buffer_res_id, buffer_base, host_read_address, offset, host_file_offset);
+
+    // Show first few bytes of buffer data for debugging
+    uint32_t host_data_sample = 0;
+    if (size >= 4) {
+        host_data_sample = *(uint32_t*)host_read_address;
+    }
+
+    // CACHE COHERENCY: Unmap and close buffer after SET operation
+    windows_host_unmap_buffer(buffer, operation_id, buffer_res_id);
+
+    // Compare checksums - FATAL on mismatch
     if (guest_checksum == host_checksum) {
-        printf("HOST  #%u res_id=%u SET_CACHE_SUCCESS: guest=0x%08x host=0x%08x (SET_SUCCESS: %u, SET_FAILURES: %u)\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum,
-               ++set_success_count, set_failure_count);
+        printf("HOST  #%u res_id=%u SET_CACHE_SUCCESS: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx (SET_SUCCESS: %u)\n",
+               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset,
+               ++set_success_count);
     } else {
-        printf("HOST  #%u res_id=%u SET_CACHE_FAILURE: guest=0x%08x host=0x%08x (SET_SUCCESS: %u, SET_FAILURES: %u)\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum,
-               set_success_count, ++set_failure_count);
+        printf("HOST  #%u res_id=%u SET_CACHE_FAILURE: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx - FATAL!\n",
+               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset);
 
-        // Continue execution instead of aborting - let's see how many fail
         if (host_checksum == 0x00000000) {
             printf("HOST  #%u res_id=%u NOTE: Host buffer contains all zeros - cache coherency broken!\n",
                    operation_id, buffer_res_id);
         }
-    }
-#define ABORT_ON_INCONSISTENCY 1
-#if ABORT_ON_INCONSISTENCY == 1
-    if (set_failure_count) {
-        printf("[HOST] set_tensor cache coherency broken, aborting!\n");
 
-        set_failure_count = 0;
-        set_success_count = 0;
-        return 1;
+        printf("[HOST] set_tensor cache coherency broken, aborting!\n");
+        return 1;  // Fatal error
     }
-#endif
     return 0;
 }
 
@@ -178,35 +217,45 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
     }
 
     // Calculate checksum of the buffer region
-    uint32_t host_checksum = simple_checksum((char *)buffer_base + offset, size);
+    void * host_read_address = (char *)buffer_base + offset;
 
-    // Compare checksums and update counters
+    // CACHE COHERENCY FIX: Reopen and remap buffer to see guest changes
+    windows_host_remap_buffer(buffer, operation_id, buffer_res_id);
+
+    uint32_t host_checksum = simple_checksum(host_read_address, size);
+
+    // Calculate absolute file offset from buffer base (matches guest calculation)
+    size_t host_file_offset = (char *)host_read_address - (char *)buffer_base;
+
+    printf("HOST  #%u res_id=%u GET_VALIDATION: buffer_base=%p read_addr=%p offset=%zu host_file_offset=0x%zx\n",
+           operation_id, buffer_res_id, buffer_base, host_read_address, offset, host_file_offset);
+
+    // Show first few bytes of buffer data for debugging
+    uint32_t host_data_sample = 0;
+    if (size >= 4) {
+        host_data_sample = *(uint32_t*)host_read_address;
+    }
+
+    // CACHE COHERENCY: Unmap and close buffer after GET operation
+    windows_host_unmap_buffer(buffer, operation_id, buffer_res_id);
+
+    // Compare checksums - FATAL on mismatch
     if (guest_checksum == host_checksum) {
-        printf("HOST  #%u res_id=%u GET_CACHE_SUCCESS: guest=0x%08x host=0x%08x (GET_SUCCESS: %u, GET_FAILURES: %u)\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum,
-               ++get_success_count, get_failure_count);
+        printf("HOST  #%u res_id=%u GET_CACHE_SUCCESS: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx (GET_SUCCESS: %u)\n",
+               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset,
+               ++get_success_count);
     } else {
-        printf("HOST  #%u res_id=%u GET_CACHE_FAILURE: guest=0x%08x host=0x%08x (GET_SUCCESS: %u, GET_FAILURES: %u)\n",
-               operation_id, buffer_res_id, guest_checksum, host_checksum,
-               get_success_count, ++get_failure_count);
+        printf("HOST  #%u res_id=%u GET_CACHE_FAILURE: guest=0x%08x host=0x%08x data=0x%08x host_file_offset=0x%zx - FATAL!\n",
+               operation_id, buffer_res_id, guest_checksum, host_checksum, host_data_sample, host_file_offset);
 
-        // Continue execution instead of aborting - let's see how many fail
         if (host_checksum == 0x00000000) {
             printf("HOST  #%u res_id=%u NOTE: Host buffer contains all zeros - cache coherency broken!\n",
                    operation_id, buffer_res_id);
         }
-    }
 
-#define ABORT_ON_INCONSISTENCY 1
-#if ABORT_ON_INCONSISTENCY == 1
-    if (get_failure_count) {
         printf("[HOST] get_tensor cache coherency broken, aborting!\n");
-
-        get_failure_count = 0;
-        get_success_count = 0;
-        return 1;
+        return 1;  // Fatal error
     }
-#endif
     return 0;
 }
 

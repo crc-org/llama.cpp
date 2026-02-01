@@ -62,16 +62,40 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
         printf("DEBUG: tensor->data=%p, mmap_ptr=%p, offset=%zu\n",
                tensor->data, buffer_ctx->shmem.mmap_ptr, offset);
 
-        printf("GUEST #%u tid=%lu res_id=%u set_tensor: offset=%zu size=%zu checksum=0x%08x\n",
-               operation_id, (unsigned long)pthread_self(), res_id, offset, size, checksum);
+        printf("GUEST #%u res_id=%u set_tensor: offset=%zu size=%zu checksum=0x%08x\n",
+               operation_id, res_id, offset, size, checksum);
+
+        // Calculate INPUT data checksum for validation
+        uint32_t input_checksum = simple_checksum(data, size);
+
+        // Calculate buffer data checksum after write
+        uint32_t buffer_checksum = simple_checksum((const char *) tensor->data + offset, size);
+
+        // Calculate file offset from beginning
+        size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
+        size_t file_offset = tensor_offset_from_base + offset;
+
+        printf("GUEST #%u res_id=%u VALIDATION: input=0x%08x buffer=0x%08x\n",
+               operation_id, res_id, input_checksum, buffer_checksum);
+        printf("GUEST #%u res_id=%u ADDRESSES: tensor->data=%p mmap_ptr=%p tensor_offset=0x%zx file_offset=0x%zx\n",
+               operation_id, res_id, tensor->data, buffer_ctx->shmem.mmap_ptr, tensor_offset_from_base, file_offset);
+
+        // VALIDATE: tensor->data must be within shared buffer bounds
+        void* buffer_start = buffer_ctx->shmem.mmap_ptr;
+        void* buffer_end = (char*)buffer_ctx->shmem.mmap_ptr + buffer_ctx->shmem.mmap_size;
+        bool tensor_within_buffer = (tensor->data >= buffer_start && tensor->data < buffer_end);
+
+        printf("GUEST #%u res_id=%u BOUNDS_CHECK: buffer=[%p-%p] size=0x%zx tensor_within_buffer=%s\n",
+               operation_id, res_id, buffer_start, buffer_end, buffer_ctx->shmem.mmap_size,
+               tensor_within_buffer ? "TRUE" : "FALSE");
 
         // 4. CACHE COHERENCY: Unmap tensor buffer so host can see our writes
         void * original_mmap_ptr = buffer_ctx->shmem.mmap_ptr;  // Store base mapping address
         void * original_tensor_data = tensor->data;              // Store tensor offset for verification
         virtgpu_shmem_unmap_for_host(&buffer_ctx->shmem);
 
-        // 5. Trigger remote call for host verification
-        apir_buffer_set_tensor(gpu, buffer_ctx, tensor, data, offset, size);
+        // 5. Trigger remote call for host verification - use absolute file offset
+        apir_buffer_set_tensor(gpu, buffer_ctx, tensor, data, file_offset, size);
 
         // 6. CACHE COHERENCY: Remap tensor buffer to see host changes
         virtgpu_shmem_remap_after_host(&buffer_ctx->shmem, original_mmap_ptr);
@@ -126,11 +150,15 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
             exit(1);
         }
 
+        // Calculate file offset from beginning (same as set_tensor)
+        size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
+        size_t file_offset = tensor_offset_from_base + offset;
+
         // Calculate checksum of buffer data for host comparison
         uint32_t guest_checksum = simple_checksum((const char *) tensor->data + offset, size);
 
-        // Trigger remote call for host to verify data (now with guest checksum)
-        apir_buffer_get_tensor(gpu, buffer_ctx, tensor, data, offset, size, guest_checksum);
+        // Trigger remote call for host to verify data (using absolute file offset)
+        apir_buffer_get_tensor(gpu, buffer_ctx, tensor, data, file_offset, size, guest_checksum);
 #endif
 
         // 1. Call the memcpy (normal operation)
