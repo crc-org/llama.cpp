@@ -40,7 +40,8 @@ void   apir_buffer_get_tensor(struct virtgpu *        gpu,
                               const ggml_tensor *     tensor,
                               void *                  data,
                               size_t                  offset,
-                              size_t                  size);
+                              size_t                  size,
+                              uint32_t                guest_checksum);
 bool   apir_buffer_cpy_tensor(struct virtgpu *        gpu,
                               apir_buffer_context_t * buffer_context,
                               const ggml_tensor *     src,

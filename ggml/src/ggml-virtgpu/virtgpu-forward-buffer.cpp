@@ -106,6 +106,17 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
                             const void *            data,
                             size_t                  offset,
                             size_t                  size) {
+    (void)tensor;  // Suppress unused parameter warning
+
+    // Calculate guest checksum to send to host for verification
+    uint32_t guest_checksum = 0;
+    if (data && size > 0) {
+        const uint8_t * bytes = (const uint8_t *)data;
+        for (size_t i = 0; i < size; i++) {
+            guest_checksum = (guest_checksum * 31) + bytes[i];
+        }
+    }
+
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -113,48 +124,14 @@ void apir_buffer_set_tensor(virtgpu *               gpu,
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_SET_TENSOR);
 
     apir_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
-    apir_encode_ggml_tensor(encoder, tensor);
-
-    virtgpu_shmem   temp_shmem;  // Local storage for large buffers
-    virtgpu_shmem * shmem = &temp_shmem;
-    bool using_shared_shmem = false;
-
-    if (size <= gpu->data_shmem.mmap_size) {
-        // Lock mutex before using shared data_shmem buffer
-        if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
-            GGML_ABORT("Failed to lock data_shmem mutex");
-        }
-        using_shared_shmem = true;
-        shmem = &gpu->data_shmem;
-
-    } else if (virtgpu_shmem_create(gpu, size, shmem)) {
-        GGML_ABORT("Couldn't allocate the guest-host shared buffer");
-    }
-
-    memcpy(shmem->mmap_ptr, data, size);
-
-    // Cache coherency: flush guest writes so host can see them
-    if (msync(shmem->mmap_ptr, size, MS_SYNC) != 0) {
-        printf("msync failed: %s\n", strerror(errno));
-    }
-
-    apir_encode_virtgpu_shmem_res_id(encoder, shmem->res_id);
-
+    apir_encode_virtgpu_shmem_res_id(encoder, buffer_context->shmem.res_id);
     apir_encode_size_t(encoder, &offset);
     apir_encode_size_t(encoder, &size);
+    apir_encode_uint32_t(encoder, &guest_checksum);  // Send guest checksum
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
     remote_call_finish(gpu, encoder, decoder);
-
-    // Unlock mutex before cleanup
-    if (using_shared_shmem) {
-        mtx_unlock(&gpu->data_shmem_mutex);
-    } else {
-        virtgpu_shmem_destroy(gpu, shmem);
-    }
-
-    return;
 }
 
 void apir_buffer_get_tensor(virtgpu *               gpu,
@@ -162,7 +139,11 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
                             const ggml_tensor *     tensor,
                             void *                  data,
                             size_t                  offset,
-                            size_t                  size) {
+                            size_t                  size,
+                            uint32_t                guest_checksum) {
+    (void)tensor;  // Suppress unused parameter warning
+    (void)data;    // Suppress unused parameter warning
+
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -170,45 +151,14 @@ void apir_buffer_get_tensor(virtgpu *               gpu,
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BUFFER_GET_TENSOR);
 
     apir_encode_apir_buffer_host_handle_t(encoder, &buffer_context->host_handle);
-    apir_encode_ggml_tensor(encoder, tensor);
-
-    virtgpu_shmem   temp_shmem;  // Local storage for large buffers
-    virtgpu_shmem * shmem = &temp_shmem;
-    bool using_shared_shmem = false;
-
-    if (size <= gpu->data_shmem.mmap_size) {
-        // Lock mutex before using shared data_shmem buffer
-        if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
-            GGML_ABORT("Failed to lock data_shmem mutex");
-        }
-        using_shared_shmem = true;
-        shmem = &gpu->data_shmem;
-
-    } else if (virtgpu_shmem_create(gpu, size, shmem)) {
-        GGML_ABORT("Couldn't allocate the guest-host shared buffer");
-    }
-
-    apir_encode_virtgpu_shmem_res_id(encoder, shmem->res_id);
+    apir_encode_virtgpu_shmem_res_id(encoder, buffer_context->shmem.res_id);
     apir_encode_size_t(encoder, &offset);
     apir_encode_size_t(encoder, &size);
+    apir_encode_uint32_t(encoder, &guest_checksum);  // Send guest checksum
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
-    // Cache coherency: invalidate guest cache so it can see host writes
-    if (msync(shmem->mmap_ptr, size, MS_INVALIDATE) != 0) {
-        printf("msync failed: %s\n", strerror(errno));
-    }
-
-    memcpy(data, shmem->mmap_ptr, size);
-
     remote_call_finish(gpu, encoder, decoder);
-
-    // Unlock mutex before cleanup
-    if (using_shared_shmem) {
-        mtx_unlock(&gpu->data_shmem_mutex);
-    } else {
-        virtgpu_shmem_destroy(gpu, shmem);
-    }
 }
 
 bool apir_buffer_cpy_tensor(virtgpu *               gpu,

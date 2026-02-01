@@ -1,6 +1,26 @@
 #include "ggml-remoting.h"
+#include "virtgpu-shm.h"
+#include <pthread.h>
 
 #define BUFFER_TO_GPU(name) ((ggml_backend_remoting_buffer_context *) (name)->context)->gpu
+
+// Simple checksum for data verification
+static uint32_t simple_checksum(const void * data, size_t size) {
+    const uint8_t * bytes = (const uint8_t *)data;
+    uint32_t checksum = 0;
+    for (size_t i = 0; i < size; i++) {
+        checksum = (checksum * 31) + bytes[i];
+    }
+    return checksum;
+}
+
+#define GUEST_CHECKSUM 1
+
+#if GUEST_CHECKSUM == 1
+// Static IDs for matching guest/host operations
+static uint32_t buffer_set_tensor_id = 0;
+static uint32_t buffer_get_tensor_id = 0;
+#endif
 
 static void * ggml_backend_remoting_buffer_get_base(ggml_backend_buffer_t buffer) {
     ggml_backend_remoting_buffer_context * context = (ggml_backend_remoting_buffer_context *) buffer->context;
@@ -18,15 +38,54 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
                                                     const void *          data,
                                                     size_t                offset,
                                                     size_t                size) {
+#if GUEST_CHECKSUM == 1
     virtgpu * gpu = BUFFER_TO_GPU(buffer);
-
+#endif
     ggml_backend_remoting_buffer_context * context = BUFFER_TO_GGML_CONTEXT(buffer);
+
     if (context->is_from_ptr) {
+#if GUEST_CHECKSUM == 1
+        // Assign static ID for matching
+        uint32_t operation_id = ++buffer_set_tensor_id;
+#endif
+        // 1. Call the memcpy (normal operation)
         memcpy((char *) tensor->data + offset, data, size);
+#if GUEST_CHECKSUM == 1
+        // 2. Show checksum of the data written
+        uint32_t checksum = simple_checksum(data, size);
+
+        // 3. Get buffer context and use res_id for matching
+        apir_buffer_context_t * buffer_ctx = BUFFER_TO_APIR_CONTEXT(buffer);
+        uint32_t res_id = buffer_ctx->shmem.res_id;
+
+        // DEBUG: Show tensor->data vs shared buffer locations
+        printf("DEBUG: tensor->data=%p, mmap_ptr=%p, offset=%zu\n",
+               tensor->data, buffer_ctx->shmem.mmap_ptr, offset);
+
+        printf("GUEST #%u tid=%lu res_id=%u set_tensor: offset=%zu size=%zu checksum=0x%08x\n",
+               operation_id, (unsigned long)pthread_self(), res_id, offset, size, checksum);
+
+        // 4. CACHE COHERENCY: Unmap tensor buffer so host can see our writes
+        void * original_mmap_ptr = buffer_ctx->shmem.mmap_ptr;  // Store base mapping address
+        void * original_tensor_data = tensor->data;              // Store tensor offset for verification
+        virtgpu_shmem_unmap_for_host(&buffer_ctx->shmem);
+
+        // 5. Trigger remote call for host verification
+        apir_buffer_set_tensor(gpu, buffer_ctx, tensor, data, offset, size);
+
+        // 6. CACHE COHERENCY: Remap tensor buffer to see host changes
+        virtgpu_shmem_remap_after_host(&buffer_ctx->shmem, original_mmap_ptr);
+
+        // 7. Verify tensor->data pointer is still valid after remapping
+        if (tensor->data != original_tensor_data) {
+            printf("FATAL: Tensor data pointer changed after remapping: %p -> %p\n",
+                   original_tensor_data, tensor->data);
+            exit(1);
+        }
+#endif
     } else {
         printf("set_tensor not from ptr\n");
         exit(1);
-        apir_buffer_set_tensor(gpu, BUFFER_TO_APIR_CONTEXT(buffer), tensor, data, offset, size);
     }
 
     return;
@@ -37,14 +96,55 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
                                                     void *                data,
                                                     size_t                offset,
                                                     size_t                size) {
+#if GUEST_CHECKSUM == 1
     virtgpu *                              gpu     = BUFFER_TO_GPU(buffer);
+#endif
     ggml_backend_remoting_buffer_context * context = BUFFER_TO_GGML_CONTEXT(buffer);
+
     if (context->is_from_ptr) {
+
+#if GUEST_CHECKSUM == 1
+        // Assign static ID for matching
+        uint32_t operation_id = ++buffer_get_tensor_id;
+
+        // Get buffer context and use res_id for matching
+        apir_buffer_context_t * buffer_ctx = BUFFER_TO_APIR_CONTEXT(buffer);
+        uint32_t res_id = buffer_ctx->shmem.res_id;
+
+        // CACHE COHERENCY: Unmap tensor buffer so host can write to it
+        void * original_mmap_ptr = buffer_ctx->shmem.mmap_ptr;  // Store base mapping address
+        void * original_tensor_data = (void*)tensor->data;       // Store tensor offset for verification
+        virtgpu_shmem_unmap_for_host(&buffer_ctx->shmem);
+
+        // CACHE COHERENCY: Remap tensor buffer to see host changes
+        virtgpu_shmem_remap_after_host(&buffer_ctx->shmem, original_mmap_ptr);
+
+        // Verify tensor->data pointer is still valid after remapping
+        if (tensor->data != original_tensor_data) {
+            printf("FATAL: Tensor data pointer changed after remapping: %p -> %p\n",
+                   original_tensor_data, tensor->data);
+            exit(1);
+        }
+
+        // Calculate checksum of buffer data for host comparison
+        uint32_t guest_checksum = simple_checksum((const char *) tensor->data + offset, size);
+
+        // Trigger remote call for host to verify data (now with guest checksum)
+        apir_buffer_get_tensor(gpu, buffer_ctx, tensor, data, offset, size, guest_checksum);
+#endif
+
+        // 1. Call the memcpy (normal operation)
         memcpy(data, (const char *) tensor->data + offset, size);
+#if GUEST_CHECKSUM == 1
+        // 2. Show checksum of the data read (should match buffer data)
+        uint32_t data_checksum = simple_checksum(data, size);
+        printf("GUEST #%u res_id=%u get_tensor: offset=%zu size=%zu buffer_checksum=0x%08x data_checksum=0x%08x\n",
+               operation_id, res_id, offset, size, guest_checksum, data_checksum);
+#endif
+
     } else {
         printf("get_tensor not from ptr\n");
         exit(1);
-        apir_buffer_get_tensor(gpu, BUFFER_TO_APIR_CONTEXT(buffer), tensor, data, offset, size);
     }
 }
 
@@ -54,7 +154,8 @@ static void ggml_backend_remoting_buffer_set_tensor_from_ptr(ggml_backend_buffer
                                                              size_t                offset,
                                                              size_t                size) {
     UNUSED(buffer);
-
+    printf("%s\n", __func__);
+    exit(1);
     memcpy((char *) tensor->data + offset, data, size);
 
     return;
@@ -66,7 +167,8 @@ static void ggml_backend_remoting_buffer_get_tensor_from_ptr(ggml_backend_buffer
                                                              size_t                offset,
                                                              size_t                size) {
     UNUSED(buffer);
-
+    printf("%s\n", __func__);
+    exit(1);
     memcpy(data, (const char *) tensor->data + offset, size);
 }
 
