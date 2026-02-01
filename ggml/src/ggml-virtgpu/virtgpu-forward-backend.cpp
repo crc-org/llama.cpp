@@ -183,16 +183,9 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     static uint32_t guest_graph_compute_counter = 0;
     guest_graph_compute_counter++;
 
-    printf("[DEBUG] GUEST #%u: === apir_backend_graph_compute ENTRY === gpu=%p cgraph=%p\n",
-           guest_graph_compute_counter, gpu, cgraph);
-    printf("[DEBUG] GUEST #%u: Input cgraph has %d nodes\n",
-           guest_graph_compute_counter, cgraph ? cgraph->n_nodes : -1);
 
     // Step 1: Find all unique buffer contexts involved in the graph
     std::unordered_set<apir_buffer_context_t *> buffer_contexts = find_graph_buffer_contexts(cgraph);
-
-    printf("[DEBUG] GUEST #%u: Found %zu unique buffer contexts\n",
-           guest_graph_compute_counter, buffer_contexts.size());
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE);
 
@@ -223,16 +216,11 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     apir_encode_cgraph_data(&secondary_enc, cgraph_data);
 
-    // For temp shmem (when not using shared memory), we need separate cache coherency
-    // since it doesn't have Windows shared file backing like regular buffers
-
-    // CACHE COHERENCY: If using shared memory, unmap the secondary command buffer
-    if (using_shared_shmem) {
-        uint64_t shmem_buffer_handle = shmem->res_id;
-        close_specific_session_files_for_guest(0, &shmem_buffer_handle, 1);
-        printf("[DEBUG] GUEST: Unmapped shared data_shmem buffer res_id=%u for host access\n", shmem->res_id);
+    // CACHE COHERENCY: Flush data to ensure host can see it - MANDATORY for guest->host consistency
+    if (msync(shmem->mmap_ptr, cgraph_size, MS_SYNC) != 0) {
+        printf("FATAL: Failed to sync secondary command buffer: %s\n", strerror(errno));
+        exit(1);
     }
-
     // Step 2: Store original mapping info and unmap buffers (just before host access)
     std::unordered_map<apir_buffer_context_t *, buffer_mapping_info> original_mappings;
     std::unordered_map<apir_buffer_context_t *, int> original_fds;
