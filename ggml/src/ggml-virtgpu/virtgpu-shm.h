@@ -1,23 +1,24 @@
 #pragma once
 
-#include "virtgpu-utils.h"
-
 #include <sys/mman.h>
-
-#include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 
-struct virtgpu;
+// Include interface for complete type definitions
+#include "virtgpu-interface.h"
 
-struct virtgpu_shmem {
-    uint32_t res_id;
-    size_t   mmap_size;
-    void *   mmap_ptr;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-    uint32_t gem_handle;
-};
+// Simplified cache coherency operations for Windows shared files
+// These work with existing structure via backend_data pointer
+// Note: virtgpu_shmem_create/destroy are declared in virtgpu-interface.h
+void virtgpu_shmem_unmap_for_host(virtgpu_shmem * shmem);
+int  virtgpu_shmem_remap_after_host(virtgpu_shmem * shmem, void * original_ptr);
+void virtgpu_shmem_sync_to_host(virtgpu_shmem * shmem);
+void virtgpu_shmem_sync_from_host(virtgpu_shmem * shmem);
 
-int  virtgpu_shmem_create(virtgpu * gpu, size_t size, virtgpu_shmem * shmem);
-void virtgpu_shmem_destroy(virtgpu * gpu, virtgpu_shmem * shmem);
+#ifdef __cplusplus
+}
+#endif

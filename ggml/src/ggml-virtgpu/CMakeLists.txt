@@ -62,6 +62,8 @@ if (NOT GGML_VIRTGPU_BACKEND STREQUAL "ONLY")
             virtgpu-forward-buffer-type.cpp
             virtgpu-forward-buffer.cpp
             virtgpu-forward-backend.cpp
+            # Windows cache coherency implementation
+            virtgpu-shm.cpp
             # Windows transport implementation (compiled as C++)
             winApiRmt.c
             winApiRmt.h

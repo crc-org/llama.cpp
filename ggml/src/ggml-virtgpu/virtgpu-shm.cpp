@@ -1,100 +1,128 @@
 #include "virtgpu-shm.h"
-
-#include "virtgpu.h"
+#include "virtgpu-interface.h"  // For complete type definitions
+#include "ggml-winapi-client.h"
 
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
 
-static uint32_t virtgpu_ioctl_resource_create_blob(virtgpu *  gpu,
-                                                   uint32_t   blob_mem,
-                                                   uint32_t   blob_flags,
-                                                   size_t     blob_size,
-                                                   uint64_t   blob_id,
-                                                   uint32_t * res_id) {
-#ifdef SIMULATE_BO_SIZE_FIX
-    blob_size = align64(blob_size, 4096);
-#endif
-
-    drm_virtgpu_resource_create_blob args = {
-        .blob_mem   = blob_mem,
-        .blob_flags = blob_flags,
-        .bo_handle  = 0,
-        .res_handle = 0,
-        .size       = blob_size,
-        .pad        = 0,
-        .cmd_size   = 0,
-        .cmd        = 0,
-        .blob_id    = blob_id,
-    };
-
-    if (virtgpu_ioctl(gpu, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args)) {
-        return 0;
-    }
-
-    *res_id = args.res_handle;
-    return args.bo_handle;
-}
-
-static void virtgpu_ioctl_gem_close(virtgpu * gpu, uint32_t gem_handle) {
-    drm_gem_close args = {
-        .handle = gem_handle,
-        .pad    = 0,
-    };
-
-    const int ret = virtgpu_ioctl(gpu, DRM_IOCTL_GEM_CLOSE, &args);
-    assert(!ret);
-#ifdef NDEBUG
-    UNUSED(ret);
-#endif
-}
-
-static void * virtgpu_ioctl_map(virtgpu * gpu, uint32_t gem_handle, size_t size) {
-    drm_virtgpu_map args = {
-        .offset = 0,
-        .handle = gem_handle,
-        .pad    = 0,
-    };
-
-    if (virtgpu_ioctl(gpu, DRM_IOCTL_VIRTGPU_MAP, &args)) {
-        return NULL;
-    }
-
-    void * ptr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, gpu->fd, args.offset);
-    if (ptr == MAP_FAILED) {
-        return NULL;
-    }
-
-    return ptr;
-}
-
-void virtgpu_shmem_destroy(virtgpu * gpu, virtgpu_shmem * shmem) {
-    munmap(shmem->mmap_ptr, shmem->mmap_size);
-    virtgpu_ioctl_gem_close(gpu, shmem->gem_handle);
-}
-
-int virtgpu_shmem_create(virtgpu * gpu, size_t size, virtgpu_shmem * shmem) {
-    size = align64(size, 16384);
-
+// Local definition to avoid include conflicts - matches virtgpu-interface.h
+typedef struct {
     uint32_t res_id;
-    uint32_t gem_handle = virtgpu_ioctl_resource_create_blob(gpu, VIRTGPU_BLOB_MEM_HOST3D,
-                                                             VIRTGPU_BLOB_FLAG_USE_MAPPABLE, size, 0, &res_id);
+    size_t   mmap_size;
+    void *   mmap_ptr;
+    void *   backend_data;
+} local_virtgpu_shmem;
 
-    if (!gem_handle) {
-        return 1;
+#include <assert.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
+
+// VirtGPU functions removed - Windows uses winapi shared buffers
+
+// virtgpu_shmem_destroy is implemented in virtgpu-common.cpp (interface wrapper)
+
+// Simplified cache coherency operations working with existing backend_data structure
+
+extern "C" {
+
+// Guest side: Unmap memory and close FD to flush data for host access
+void virtgpu_shmem_unmap_for_host(virtgpu_shmem * shmem) {
+    local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
+    if (!local_shmem || !local_shmem->backend_data) return;
+
+    ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)local_shmem->backend_data;
+
+    // Flush writes before unmapping
+    if (local_shmem->mmap_ptr && local_shmem->mmap_size > 0) {
+        if (msync(local_shmem->mmap_ptr, local_shmem->mmap_size, MS_SYNC) != 0) {
+            printf("FATAL: msync MS_SYNC failed for buffer: %s\n", strerror(errno));
+            exit(1);
+        }
+
+        // Unmap memory
+        if (munmap(local_shmem->mmap_ptr, local_shmem->mmap_size) != 0) {
+            printf("FATAL: munmap failed for buffer %p: %s\n", local_shmem->mmap_ptr, strerror(errno));
+            exit(1);
+        }
+        local_shmem->mmap_ptr = NULL;
     }
 
-    void * ptr = virtgpu_ioctl_map(gpu, gem_handle, size);
-    if (!ptr) {
-        virtgpu_ioctl_gem_close(gpu, gem_handle);
-        fprintf(stderr, "virtgpu_ioctl_map FAILED\n");
-        exit(1);
-        return 1;
+    // Close FD to flush to disk for host
+    if (winapi_buf->fd >= 0) {
+        close(winapi_buf->fd);
+        winapi_buf->fd = -1;
     }
+}
 
-    shmem->res_id     = res_id;
-    shmem->mmap_size  = size;
-    shmem->mmap_ptr   = ptr;
-    shmem->gem_handle = gem_handle;
+// Guest side: Reopen file and remap at original address to see host changes
+int virtgpu_shmem_remap_after_host(virtgpu_shmem * shmem, void * original_ptr) {
+    local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
+    if (!local_shmem || !local_shmem->backend_data) return 0;
+
+    ggml_winapi_shared_buffer_t * winapi_buf = (ggml_winapi_shared_buffer_t *)local_shmem->backend_data;
+
+    // Reopen file with fresh FD to see host changes
+    if (winapi_buf->file_path[0]) {
+        int fresh_fd = open(winapi_buf->file_path, O_RDWR);
+        if (fresh_fd < 0) {
+            printf("FATAL: Failed to reopen file after host operation: %s\n", strerror(errno));
+            exit(1);
+        }
+        winapi_buf->fd = fresh_fd;
+
+        // Remap at original address - must succeed at same address
+        void * remapped = mmap(original_ptr, local_shmem->mmap_size, PROT_READ | PROT_WRITE,
+                              MAP_SHARED | MAP_FIXED, fresh_fd, 0);
+
+        if (remapped == MAP_FAILED || remapped != original_ptr) {
+            printf("FATAL: Failed to remap buffer at original address %p: %s\n",
+                   original_ptr, strerror(errno));
+            exit(1);
+        }
+
+        local_shmem->mmap_ptr = remapped;
+
+        // Invalidate cache to see host changes
+        if (msync(remapped, local_shmem->mmap_size, MS_INVALIDATE) != 0) {
+            printf("FATAL: msync MS_INVALIDATE failed: %s\n", strerror(errno));
+            exit(1);
+        }
+    }
 
     return 0;
 }
+
+// Guest side: Sync data TO host (flush writes)
+void virtgpu_shmem_sync_to_host(virtgpu_shmem * shmem) {
+    local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
+    if (!local_shmem || !local_shmem->mmap_ptr) return;
+
+    if (msync(local_shmem->mmap_ptr, local_shmem->mmap_size, MS_SYNC) != 0) {
+        printf("FATAL: sync to host failed: %s\n", strerror(errno));
+        exit(1);
+    }
+}
+
+// Guest side: Sync data FROM host (invalidate cache)
+void virtgpu_shmem_sync_from_host(virtgpu_shmem * shmem) {
+    local_virtgpu_shmem * local_shmem = (local_virtgpu_shmem *)shmem;
+    if (!local_shmem || !local_shmem->mmap_ptr) return;
+
+    if (msync(local_shmem->mmap_ptr, local_shmem->mmap_size, MS_INVALIDATE) != 0) {
+        printf("FATAL: sync from host failed: %s\n", strerror(errno));
+        exit(1);
+    }
+}
+
+// virtgpu_shmem_create is implemented in virtgpu-common.cpp (interface wrapper)
+
+} // extern "C"
