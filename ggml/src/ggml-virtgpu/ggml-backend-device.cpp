@@ -64,7 +64,7 @@ static void ggml_backend_remoting_device_get_props(ggml_backend_dev_t dev, ggml_
     apir_device_get_props(gpu, &props->caps.async, &props->caps.host_buffer, &props->caps.buffer_from_host_ptr,
                           &props->caps.events);
 
-    props->caps.buffer_from_host_ptr = true;
+    props->caps.buffer_from_host_ptr = false;
     props->caps.async                = false;
     props->caps.events               = false;
 }

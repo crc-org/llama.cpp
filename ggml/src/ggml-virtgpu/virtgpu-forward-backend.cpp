@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <sys/mman.h>
 
 // Uncomment to enable checksum debugging
 #define CHECKSUM_CGRAPH_BUFFERS
@@ -133,7 +134,8 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     static const uint32_t expected_checksums[] = {0x00000000, 0x20cf3e51, 0x8993d3dc};
     static const size_t num_expected = sizeof(expected_checksums) / sizeof(expected_checksums[0]);
 
-    // Calculate checksums before processing (buffer level)
+#if 0
+    // Calculate checksums before processing (buffer level) - DISABLED
     printf("GUEST #%u: Buffer checksums before processing:\n", guest_graph_compute_counter);
     for (size_t i = 0; i < buffer_shmems.size(); i++) {
         virtgpu_shmem * shmem = buffer_shmems[i];
@@ -157,6 +159,7 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
             }
         }
     }
+#endif
 #endif
 
 

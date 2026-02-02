@@ -2207,6 +2207,27 @@ static ggml_backend_buffer_t ggml_backend_cpu_buffer_type_alloc_buffer(ggml_back
         return NULL;
     }
 
+#if 0
+    // DEBUG: Protect Buffer 1 (89MB) in CPU backend to compare with VirtGPU - Windows only for now
+    if (size == 89941248) {
+        printf("[CPU_BUFFER_1_DEBUG] Allocated CPU Buffer 1 %p size %zu\n", data, size);
+        #ifdef _WIN32
+            // Windows protection using VirtualProtect
+            DWORD oldProtect;
+            if (!VirtualProtect(data, size, PAGE_NOACCESS, &oldProtect)) {
+                printf("[CPU_BUFFER_1_DEBUG] Could not protect CPU Buffer 1 %p: Error %lu\n", data, GetLastError());
+            } else {
+                printf("[CPU_BUFFER_1_DEBUG] Protected CPU Buffer 1 %p - will segfault on first write\n", data);
+            }
+        #else
+            // Linux: Skip protection to avoid build issues
+            printf("[CPU_BUFFER_1_DEBUG] Linux: Skipping protection for now\n");
+        #endif
+    } else if (size > 1024 * 1024) {
+        printf("[CPU_BUFFER_DEBUG] Allocated CPU buffer %p size %zu\n", data, size);
+    }
+#endif
+
     return ggml_backend_buffer_init(buft, ggml_backend_cpu_buffer_i, data, size);
 }
 

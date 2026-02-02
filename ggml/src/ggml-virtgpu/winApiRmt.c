@@ -24,6 +24,13 @@
 #include <errno.h>     // For errno
 #include <sys/socket.h> // For send(), recv()
 #include <netinet/in.h> // For ntohl(), htonl()
+#include <signal.h>     // For signal handlers
+#include <execinfo.h>   // For backtrace
+
+/* DEBUG: First write detection */
+void* debug_protected_buffer = NULL;
+size_t debug_protected_size = 0;
+static bool debug_first_write_caught = false;
 
 /* Function name mapping for client-side logging */
 static const char * frontend_command_name(int cmd_type) {
@@ -638,6 +645,25 @@ static int windows_shmem_create(virtgpu* gpu, size_t size, virtgpu_shmem* shmem)
     shmem->mmap_size = size;
     shmem->mmap_ptr = shmem_data->buffer.data;
     shmem->backend_data = shmem_data;
+
+#if 0
+    /* DEBUG: Protect Buffer 1 (89MB) to catch why model weights aren't being written */
+    if (size == 89941248 && !debug_first_write_caught) {  // Buffer 1 should get model weights but doesn't
+        // Protect this buffer to catch first write with GDB
+        if (mprotect(shmem->mmap_ptr, size, PROT_NONE) == 0) {
+            debug_protected_buffer = shmem->mmap_ptr;
+            debug_protected_size = size;
+            printf("[PROTECT_BUFFER_1] Protected Buffer 1 %p size %zu (res_id=%u) - should get model weights!\n",
+                   debug_protected_buffer, debug_protected_size, shmem->res_id);
+            debug_first_write_caught = true; // Only protect Buffer 1
+        } else {
+            printf("[PROTECT_BUFFER_1] Could not protect Buffer 1 %p: %s\n", shmem->mmap_ptr, strerror(errno));
+        }
+    } else if (size > 1024 * 1024) {
+        printf("[BUFFER_DEBUG] Buffer allocated %p size %zu (res_id=%u)\n",
+               shmem->mmap_ptr, size, shmem->res_id);
+    }
+#endif
 
     /* Register buffer with Windows service */
     ret = ggml_winapi_register_buffer(win_data->winapi_handle, &shmem_data->buffer);
