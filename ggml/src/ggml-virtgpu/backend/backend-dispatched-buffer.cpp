@@ -37,6 +37,7 @@ static void windows_host_remap_buffer(void* buffer, uint32_t operation_id, uint3
 #endif
 }
 
+#if 0
 // Simple checksum for data verification
 static uint32_t simple_checksum(const void * data, size_t size) {
     const uint8_t * bytes = (const uint8_t *)data;
@@ -46,6 +47,7 @@ static uint32_t simple_checksum(const void * data, size_t size) {
     }
     return checksum;
 }
+#endif
 
 // Static IDs for matching guest/host operations
 static uint32_t buffer_set_tensor_id = 0;
@@ -125,11 +127,13 @@ uint32_t backend_buffer_set_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         return 1;
     }
 
+#if 0
     // CACHE COHERENCY: Reopen and remap buffer to see guest changes
     windows_host_remap_buffer(buffer, operation_id, buffer_res_id);
 
     // CACHE COHERENCY: Unmap and close buffer after SET operation
     windows_host_unmap_buffer(buffer, operation_id, buffer_res_id);
+#endif
 
 #if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
     // Calculate checksum of the buffer region for verification
@@ -222,6 +226,7 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         return 1;
     }
 
+#if 0
     // Calculate checksum of the buffer region
     void * host_read_address = (char *)buffer_base + offset;
 
@@ -262,6 +267,7 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         printf("[HOST_GET] Cache coherency failure, aborting!\n");
         return 1;  // Fatal error
     }
+#endif
     return 0;
 }
 

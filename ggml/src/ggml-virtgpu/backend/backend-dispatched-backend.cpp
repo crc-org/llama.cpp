@@ -12,7 +12,7 @@
 #include <algorithm>
 
 // Enable checksum debugging for cache coherency verification
-#define CHECKSUM_CGRAPH_BUFFERS
+//#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External functions for buffer management (defined in main.cpp)
 extern "C" void unmap_all_session_buffers(uint32_t session_id);

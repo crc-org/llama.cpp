@@ -14,7 +14,7 @@ static uint32_t simple_checksum(const void * data, size_t size) {
     return checksum;
 }
 
-#define GUEST_CHECKSUM 1
+#define GUEST_CHECKSUM 0
 #define VERIFY_SET_TENSOR_CACHE_COHERENCY 1
 
 #if GUEST_CHECKSUM == 1
@@ -105,6 +105,7 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
         size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
         size_t file_offset = tensor_offset_from_base + offset;
 
+#if 0
         // Calculate checksum of buffer data that we're about to read
         uint32_t guest_checksum = simple_checksum((const char *) tensor->data + offset, size);
 
@@ -118,10 +119,16 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
 
         // HOST VERIFICATION: Ask host what it sees at this location
         apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
+#else
+        // Simplified version without checksum verification
+        uint32_t guest_checksum = 0;  // Dummy value
+        apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
+#endif
 
         // 1. Call the memcpy (normal operation)
         memcpy(data, (const char *) tensor->data + offset, size);
 
+#if 0
         // Simple checksum diagnostic (independent of GUEST_CHECKSUM)
         uint32_t buffer_checksum = simple_checksum((const char *) tensor->data + offset, size);
         uint32_t data_checksum = simple_checksum(data, size);
@@ -133,6 +140,7 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
             printf("[GET_DIAG] #%u: buffer=0x%08x data=0x%08x size=%zu\n",
                    get_tensor_count, buffer_checksum, data_checksum, size);
         }
+#endif
 #if GUEST_CHECKSUM == 1
         // 2. Show checksum of the data read (should match buffer data)
         // printf("GUEST #%u res_id=%u get_tensor: offset=%zu size=%zu buffer_checksum=0x%08x data_checksum=0x%08x\n",

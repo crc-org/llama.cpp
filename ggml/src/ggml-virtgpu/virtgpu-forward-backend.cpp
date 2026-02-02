@@ -7,7 +7,7 @@
 #include <sys/mman.h>
 
 // Uncomment to enable checksum debugging
-#define CHECKSUM_CGRAPH_BUFFERS
+//#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External function for guest-side cache coherency
 extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);

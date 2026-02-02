@@ -13,7 +13,7 @@
 #include <algorithm>
 
 // Enable checksum debugging for CPU backend comparison
-#define CHECKSUM_CPU_BUFFERS
+//#define CHECKSUM_CPU_BUFFERS
 
 #ifdef CHECKSUM_CPU_BUFFERS
 // Simple checksum for data verification (same as VirtGPU backend)
