@@ -6,7 +6,7 @@
 #include <algorithm>
 
 // Uncomment to enable checksum debugging
-//#define CHECKSUM_CGRAPH_BUFFERS
+#define CHECKSUM_CGRAPH_BUFFERS
 
 // CACHE COHERENCY: External function for guest-side cache coherency
 extern "C" void close_specific_session_files_for_guest(uint32_t session_id, const uint64_t* buffer_handles, uint32_t num_buffers);
@@ -36,8 +36,17 @@ static uint32_t simple_checksum(const void * data, size_t size) {
 
 // Step 2: Unmap all buffers for host access
 static void unmap_graph_buffers_for_host(const std::vector<virtgpu_shmem *> & shmems) {
-    for (virtgpu_shmem * shmem : shmems) {
+    for (size_t i = 0; i < shmems.size(); i++) {
+        virtgpu_shmem * shmem = shmems[i];
         if (shmem && shmem->backend_data) {  // Only for Windows shared files
+            // Compute checksum before unmapping
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+            if (shmem->mmap_ptr && shmem->mmap_size > 0) {
+                uint32_t checksum = simple_checksum(shmem->mmap_ptr, shmem->mmap_size);
+                printf("[FRONTEND_UNMAP] Buffer %zu res_id=%u: checksum=0x%08x size=%zu (before unmap)\n",
+                       i, shmem->res_id, checksum, shmem->mmap_size);
+            }
+#endif
             original_ptrs[shmem] = shmem->mmap_ptr;  // Store original pointer
             virtgpu_shmem_unmap_for_host(shmem);
         }
@@ -46,10 +55,20 @@ static void unmap_graph_buffers_for_host(const std::vector<virtgpu_shmem *> & sh
 
 // Step 3: Remap all buffers after host processing
 static void remap_graph_buffers_after_host(const std::vector<virtgpu_shmem *> & shmems) {
-    for (virtgpu_shmem * shmem : shmems) {
+    for (size_t i = 0; i < shmems.size(); i++) {
+        virtgpu_shmem * shmem = shmems[i];
         if (shmem && shmem->backend_data && original_ptrs.find(shmem) != original_ptrs.end()) {
             void * original_ptr = original_ptrs[shmem];
             virtgpu_shmem_remap_after_host(shmem, original_ptr);
+
+            // Compute checksum after remapping to see host changes
+#ifdef CHECKSUM_CGRAPH_BUFFERS
+            if (shmem->mmap_ptr && shmem->mmap_size > 0) {
+                uint32_t checksum = simple_checksum(shmem->mmap_ptr, shmem->mmap_size);
+                printf("[FRONTEND_REMAP] Buffer %zu res_id=%u: checksum=0x%08x size=%zu (after remap)\n",
+                       i, shmem->res_id, checksum, shmem->mmap_size);
+            }
+#endif
         }
     }
     original_ptrs.clear();  // Clean up tracking map
@@ -110,17 +129,36 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     printf("GUEST #%u: Processing cgraph with %d nodes, %zu buffers\n",
            guest_graph_compute_counter, cgraph->n_nodes, buffer_shmems.size());
 
+    // Expected checksums from CPU backend (reference values)
+    static const uint32_t expected_checksums[] = {0x00000000, 0x20cf3e51, 0x8993d3dc};
+    static const size_t num_expected = sizeof(expected_checksums) / sizeof(expected_checksums[0]);
+
     // Calculate checksums before processing (buffer level)
     printf("GUEST #%u: Buffer checksums before processing:\n", guest_graph_compute_counter);
     for (size_t i = 0; i < buffer_shmems.size(); i++) {
         virtgpu_shmem * shmem = buffer_shmems[i];
         if (shmem && shmem->mmap_ptr && shmem->mmap_size > 0) {
             uint32_t checksum = simple_checksum(shmem->mmap_ptr, shmem->mmap_size);
-            printf("GUEST #%u: Buffer %zu checksum before: 0x%08x\n",
-                   guest_graph_compute_counter, i, checksum);
+
+            // Compare against expected values
+            if (i < num_expected) {
+                if (checksum == expected_checksums[i]) {
+                    printf("GUEST #%u: Buffer %zu checksum before: 0x%08x ✓ (matches CPU)\n",
+                           guest_graph_compute_counter, i, checksum);
+                } else {
+                    printf("GUEST #%u: Buffer %zu checksum before: 0x%08x ✗ (expected 0x%08x)\n",
+                           guest_graph_compute_counter, i, checksum, expected_checksums[i]);
+                    printf("FATAL: Buffer %zu has wrong data - model weights not loaded properly!\n", i);
+                    _exit(1);
+                }
+            } else {
+                printf("GUEST #%u: Buffer %zu checksum before: 0x%08x (no reference)\n",
+                       guest_graph_compute_counter, i, checksum);
+            }
         }
     }
 #endif
+
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE);
 
@@ -134,12 +172,14 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     if (cgraph_size <= gpu->data_shmem.mmap_size) {
         // Lock mutex before using shared data_shmem buffer
         if (mtx_lock(&gpu->data_shmem_mutex) != thrd_success) {
-            GGML_ABORT("Failed to lock data_shmem mutex");
+            printf("FATAL: Failed to lock data_shmem mutex\n");
+            exit(1);
         }
         using_shared_shmem = true;
         shmem = &gpu->data_shmem;
     } else if (virtgpu_shmem_create(gpu, cgraph_size, shmem)) {
-        GGML_ABORT("Couldn't allocate the guest-host shared buffer");
+        printf("FATAL: Couldn't allocate the guest-host shared buffer\n");
+        exit(1);
     }
 
     apir_encode_virtgpu_shmem_res_id(encoder, shmem->res_id);
