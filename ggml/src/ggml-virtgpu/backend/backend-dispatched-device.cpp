@@ -6,6 +6,9 @@
 
 #include <cstdint>
 
+// External function to get buffer info (defined in main.cpp)
+extern "C" const char* get_buffer_info(uint32_t session_id, uint32_t res_id, size_t* out_size);
+
 uint32_t backend_device_get_device_count(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
     GGML_UNUSED(ctx);
@@ -155,6 +158,25 @@ uint32_t backend_device_buffer_from_ptr(apir_encoder * enc, apir_decoder * dec, 
         GGML_LOG_ERROR("Couldn't get the shmem addr from virgl\n");
         apir_decoder_set_fatal(dec);
         return 1;
+    }
+
+    // Log buffer_from_ptr operation with file info and size
+    size_t buffer_size = 0;
+    const char* filename = get_buffer_info(ctx->ctx_id, shmem_res_id, &buffer_size);
+    if (filename) {
+        if (buffer_size >= 1024*1024) {
+            printf("[BUFFER_FROM_PTR] session=%u res_id=%u file=%s size=%.1fMB\n",
+                   ctx->ctx_id, shmem_res_id, filename, buffer_size / (1024.0 * 1024.0));
+        } else if (buffer_size >= 1024) {
+            printf("[BUFFER_FROM_PTR] session=%u res_id=%u file=%s size=%.1fKB\n",
+                   ctx->ctx_id, shmem_res_id, filename, buffer_size / 1024.0);
+        } else {
+            printf("[BUFFER_FROM_PTR] session=%u res_id=%u file=%s size=%zuB\n",
+                   ctx->ctx_id, shmem_res_id, filename, buffer_size);
+        }
+    } else {
+        printf("[BUFFER_FROM_PTR] session=%u res_id=%u file=<unknown> ptr=%p\n",
+               ctx->ctx_id, shmem_res_id, shmem_ptr);
     }
 
     size_t size;

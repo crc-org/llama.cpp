@@ -836,6 +836,28 @@ extern "C" void ensure_all_session_buffers_mapped(uint32_t session_id) {
     }
 }
 
+// Helper function to get buffer filename and size
+extern "C" const char* get_buffer_info(uint32_t session_id, uint32_t res_id, size_t* out_size) {
+    std::lock_guard<std::mutex> lock(g_buffer_mutex);
+
+    auto session_it = g_client_sessions.find(session_id);
+    if (session_it == g_client_sessions.end()) {
+        return NULL;
+    }
+
+    auto& session = session_it->second;
+    auto buffer_it = session.buffers.find(res_id);
+    if (buffer_it == session.buffers.end()) {
+        return NULL;
+    }
+
+    auto& mapping = buffer_it->second;
+    if (out_size) {
+        *out_size = mapping.size;
+    }
+    return mapping.file_path.c_str();
+}
+
 static struct virgl_apir_callbacks g_windows_callbacks = {
     .get_config = windows_get_config,
     .get_shmem_ptr = windows_get_shmem_ptr,
