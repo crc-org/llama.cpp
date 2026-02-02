@@ -44,16 +44,18 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
     ggml_backend_remoting_buffer_context * context = BUFFER_TO_GGML_CONTEXT(buffer);
 
     if (context->is_from_ptr) {
-        // Simple operation: just write data to shared buffer
+        // Minimal operation: just write data to shared buffer
         memcpy((char *) tensor->data + offset, data, size);
 
+#if 0
         // Simple diagnostic to confirm set_tensor is being called
-        // static uint32_t set_tensor_count = 0;
-        // set_tensor_count++;
-        // if (set_tensor_count <= 3) {
-        //     uint32_t checksum = simple_checksum(data, size);
-        //     printf("[SET_DIAG] #%u: checksum=0x%08x size=%zu\n", set_tensor_count, checksum, size);
-        // }
+        static uint32_t set_tensor_count = 0;
+        set_tensor_count++;
+        if (set_tensor_count <= 3) {
+            uint32_t checksum = simple_checksum(data, size);
+            printf("[SET_DIAG] #%u: checksum=0x%08x size=%zu\n", set_tensor_count, checksum, size);
+        }
+#endif
 
 #if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
         virtgpu * gpu = BUFFER_TO_GPU(buffer);
@@ -99,15 +101,15 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
     if (context->is_from_ptr) {
         // Get buffer context and use res_id for matching
         apir_buffer_context_t * buffer_ctx = BUFFER_TO_APIR_CONTEXT(buffer);
-        uint32_t res_id = buffer_ctx->shmem.res_id;
 
         // Calculate file offset from beginning
         size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
         size_t file_offset = tensor_offset_from_base + offset;
 
-#if 0
         // Calculate checksum of buffer data that we're about to read
         uint32_t guest_checksum = simple_checksum((const char *) tensor->data + offset, size);
+#if 0
+        uint32_t res_id = buffer_ctx->shmem.res_id;
 
         // Show first few get_tensor calls for debugging
         static uint32_t host_verify_count = 0;
@@ -118,14 +120,10 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
         }
 
         // HOST VERIFICATION: Ask host what it sees at this location
-        apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
-#else
-        // Simplified version without checksum verification
-        uint32_t guest_checksum = 0;  // Dummy value
-        apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
 #endif
+        apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
 
-        // 1. Call the memcpy (normal operation)
+        // Minimal operation: just read data from shared buffer
         memcpy(data, (const char *) tensor->data + offset, size);
 
 #if 0
@@ -141,8 +139,9 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
                    get_tensor_count, buffer_checksum, data_checksum, size);
         }
 #endif
+
 #if GUEST_CHECKSUM == 1
-        // 2. Show checksum of the data read (should match buffer data)
+        // Show checksum of the data read (should match buffer data)
         // printf("GUEST #%u res_id=%u get_tensor: offset=%zu size=%zu buffer_checksum=0x%08x data_checksum=0x%08x\n",
         //        operation_id, res_id, offset, size, guest_checksum, data_checksum);
 #endif
