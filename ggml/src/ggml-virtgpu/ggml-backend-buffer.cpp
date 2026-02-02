@@ -44,6 +44,23 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
     ggml_backend_remoting_buffer_context * context = BUFFER_TO_GGML_CONTEXT(buffer);
 
     if (context->is_from_ptr) {
+        // Get buffer context for logging
+        apir_buffer_context_t * buffer_ctx = BUFFER_TO_APIR_CONTEXT(buffer);
+        uint32_t res_id = buffer_ctx->shmem.res_id;
+
+        // Calculate file offset from beginning of buffer (shared calculation)
+        size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
+        size_t file_offset = tensor_offset_from_base + offset;
+
+        // Log set_tensor operation with buffer file offset (only for >= 200KB)
+        if (size >= 200*1024) {
+            if (size >= 1024*1024) {
+                printf("[SET_TENSOR] res_id=%u file_offset=0x%lx length=%.1fMB\n", res_id, file_offset, size / (1024.0 * 1024.0));
+            } else {
+                printf("[SET_TENSOR] res_id=%u file_offset=0x%lx length=%.1fKB\n", res_id, file_offset, size / 1024.0);
+            }
+        }
+
         // Minimal operation: just write data to shared buffer
         memcpy((char *) tensor->data + offset, data, size);
 
@@ -59,11 +76,7 @@ static void ggml_backend_remoting_buffer_set_tensor(ggml_backend_buffer_t buffer
 
 #if VERIFY_SET_TENSOR_CACHE_COHERENCY == 1
         virtgpu * gpu = BUFFER_TO_GPU(buffer);
-        apir_buffer_context_t * buffer_ctx = BUFFER_TO_APIR_CONTEXT(buffer);
-
-        // Calculate file offset from beginning
-        size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
-        size_t file_offset = tensor_offset_from_base + offset;
+        // buffer_ctx, tensor_offset_from_base, and file_offset already calculated above
 
         // CACHE COHERENCY: Unmap tensor buffer so host can see our writes
         void * original_mmap_ptr = buffer_ctx->shmem.mmap_ptr;  // Store base mapping address
@@ -106,8 +119,26 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
         size_t tensor_offset_from_base = (char*)tensor->data - (char*)buffer_ctx->shmem.mmap_ptr;
         size_t file_offset = tensor_offset_from_base + offset;
 
+        uint32_t res_id = buffer_ctx->shmem.res_id;
+
+#if 0
         // Calculate checksum of buffer data that we're about to read
         uint32_t guest_checksum = simple_checksum((const char *) tensor->data + offset, size);
+
+        // Log get_tensor operation with buffer file offset and checksum
+        printf("[GET_TENSOR] res_id=%u file_offset=0x%lx length=%zu checksum=0x%08x\n",
+               res_id, file_offset, size, guest_checksum);
+#else
+        // Log get_tensor operation with buffer file offset (only for >= 200KB)
+        if (size >= 200*1024) {
+            if (size >= 1024*1024) {
+                printf("[GET_TENSOR] res_id=%u file_offset=0x%lx length=%.1fMB\n", res_id, file_offset, size / (1024.0 * 1024.0));
+            } else {
+                printf("[GET_TENSOR] res_id=%u file_offset=0x%lx length=%.1fKB\n", res_id, file_offset, size / 1024.0);
+            }
+        }
+#endif
+
 #if 0
         uint32_t res_id = buffer_ctx->shmem.res_id;
 
@@ -120,9 +151,8 @@ static void ggml_backend_remoting_buffer_get_tensor(ggml_backend_buffer_t buffer
         }
 
         // HOST VERIFICATION: Ask host what it sees at this location
-#endif
         apir_buffer_get_tensor(BUFFER_TO_GPU(buffer), buffer_ctx, tensor, data, file_offset, size, guest_checksum);
-
+#endif
         // Minimal operation: just read data from shared buffer
         memcpy(data, (const char *) tensor->data + offset, size);
 

@@ -131,6 +131,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
+    // CACHE COHERENCY: Skip buffer remapping during graph compute - cache coherency handles buffer access
+    // ensure_all_session_buffers_mapped(ctx->ctx_id);
+
     // CACHE COHERENCY: Flush all buffers before computation so host sees guest writes
     flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
@@ -202,8 +205,8 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // CACHE COHERENCY: Clean up buffers after checksums are complete
-    close_specific_session_files_for_guest(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
+    // CACHE COHERENCY: Skip buffer cleanup on host side - CPU backend needs persistent mappings
+    // close_specific_session_files_for_guest(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());
 
     // CACHE COHERENCY: Flush buffers after computation so guest sees host results
     flush_specific_session_buffers(ctx->ctx_id, buffer_res_ids.data(), buffer_res_ids.size());

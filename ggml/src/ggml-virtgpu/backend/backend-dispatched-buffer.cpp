@@ -180,7 +180,7 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
     GGML_UNUSED(enc);
 
     // CACHE COHERENCY: Ensure all session buffers are mapped before buffer operations
-    ensure_all_session_buffers_mapped(ctx->ctx_id);
+    //ensure_all_session_buffers_mapped(ctx->ctx_id);
 
     // Decode minimal verification message (matches guest's apir_buffer_get_tensor)
     apir_buffer_host_handle_t buffer_handle;
@@ -197,7 +197,7 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
 
     uint32_t guest_checksum;
     apir_decode_uint32_t(dec, &guest_checksum);
-
+#if 0
     // Assign matching static ID
     uint32_t operation_id = ++buffer_get_tensor_id;
 
@@ -225,7 +225,7 @@ uint32_t backend_buffer_get_tensor(apir_encoder * enc, apir_decoder * dec, virgl
         get_failure_count++;
         return 1;
     }
-
+#endif
 #if 0
     // Calculate checksum of the buffer region
     void * host_read_address = (char *)buffer_base + offset;

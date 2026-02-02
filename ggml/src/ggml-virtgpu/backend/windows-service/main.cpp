@@ -379,6 +379,8 @@ extern "C" void flush_specific_session_buffers(uint32_t session_id, const uint64
                            buffer_id, GetLastError());
                 }
             }
+        } else {
+            printf("[DEBUG] Buffer %u not mapped on Windows side for flushing\n", buffer_id);
         }
     }
 }
