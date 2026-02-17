@@ -151,6 +151,9 @@ functions:
         - "ggml_cgraph *cgraph"
         enabled: false
 
+      cleanup:
+        frontend_return: "void"
+
 # Naming patterns used for code generation
 naming_patterns:
   # How to generate enum names

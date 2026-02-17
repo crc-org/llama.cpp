@@ -30,7 +30,8 @@ typedef enum ApirBackendCommandType {
 
     /* backend */
     APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 22,
+    APIR_COMMAND_TYPE_BACKEND_CLEANUP       = 23,
 
     // last command_type index + 1
-    APIR_BACKEND_DISPATCH_TABLE_COUNT = 23,
+    APIR_BACKEND_DISPATCH_TABLE_COUNT = 24,
 } ApirBackendCommandType;

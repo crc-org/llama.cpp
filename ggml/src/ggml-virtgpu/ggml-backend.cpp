@@ -8,6 +8,10 @@ static const char * ggml_backend_remoting_get_name(ggml_backend_t backend) {
 }
 
 static void ggml_backend_remoting_free(ggml_backend_t backend) {
+    // MEMORY LEAK FIX: Notify backend to clean up CUDA graphs before destroying frontend
+    virtgpu * gpu = DEV_TO_GPU(backend->device);
+    apir_backend_cleanup(gpu);
+
     delete backend;
 }
 

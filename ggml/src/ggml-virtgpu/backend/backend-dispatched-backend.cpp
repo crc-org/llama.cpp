@@ -99,3 +99,16 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     return 0;
 }
+
+uint32_t backend_backend_cleanup(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
+    GGML_UNUSED(ctx);
+    GGML_UNUSED(enc);
+    GGML_UNUSED(dec);
+
+    if (bck) {
+        ggml_backend_free(bck);
+        bck = NULL;
+    }
+
+    return 0;
+}

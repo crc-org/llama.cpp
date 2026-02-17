@@ -56,3 +56,15 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     return status;
 }
+
+void apir_backend_cleanup(virtgpu * gpu) {
+    apir_encoder *        encoder;
+    apir_decoder *        decoder;
+    ApirForwardReturnCode ret;
+
+    REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_CLEANUP);
+
+    REMOTE_CALL(gpu, encoder, decoder, ret);
+
+    remote_call_finish(gpu, encoder, decoder);
+}
