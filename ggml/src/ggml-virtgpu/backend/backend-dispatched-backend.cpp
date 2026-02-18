@@ -6,6 +6,36 @@
 #include "shared/apir_backend.h"
 
 #include <cstdint>
+#include <unordered_map>
+#include <mutex>
+#include <vector>
+#include <cstdlib>
+#include <cstring>
+
+// Enable/disable stable pointer caching for CUDA graphs
+// WARNING: Stable caching may break CUDA graph tensor relationships
+#define ENABLE_STABLE_POINTER_CACHING 0
+
+// Stable pointer caching is now per-device in apir_device_extension
+
+uint32_t backend_backend_initialize(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
+    GGML_UNUSED(ctx);
+
+    // Decode backend initialization request
+    uintptr_t function_ptr;
+    apir_decode_uintptr_t(dec, &function_ptr);
+    void * ggml_backend_reg_fct_p = (void*)function_ptr;
+
+    // Call the actual initialization
+    uintptr_t backend_handle = 0;
+    uint32_t result = backend_dispatch_initialize(ggml_backend_reg_fct_p, &backend_handle);
+
+    // Encode the result and handle
+    apir_encode_uint32_t(enc, &result);
+    apir_encode_uintptr_t(enc, &backend_handle);
+
+    return 0;
+}
 
 // SECURITY: Essential validation for computation graph parameters
 static uint32_t validate_graph_operation(size_t cgraph_size, const char* operation) {
@@ -51,6 +81,10 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     size_t cgraph_size;
     apir_decode_size_t(dec, &cgraph_size);
 
+    // Decode frontend cgraph key for caching
+    uintptr_t frontend_key;
+    apir_decode_uintptr_t(dec, &frontend_key);
+
     // SECURITY: Validate graph size before processing
     if (validate_graph_operation(cgraph_size, __func__) != 0) {
         apir_decoder_set_fatal(dec);
@@ -73,6 +107,61 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
                       __func__, cgraph->n_nodes, cgraph->n_leafs);
         return 1;
     }
+
+#if ENABLE_STABLE_POINTER_CACHING
+    // Stable pointer caching for CUDA graph keys
+    // WARNING: This may break CUDA graph tensor relationships
+    void** cached_stable_nodes = nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
+        auto it = backend_stable_nodes_cache.find(frontend_key);
+        if (it != backend_stable_nodes_cache.end()) {
+            cached_stable_nodes = it->second;
+        }
+    }
+
+    // Reuse cached stable node array if structure matches
+    if (cached_stable_nodes && backend_stable_nodes_count[frontend_key] == cgraph->n_nodes) {
+
+        // CRITICAL: Save fresh nodes before replacing with cached stable ones
+        struct ggml_tensor** fresh_nodes = cgraph->nodes;
+
+        // Replace cgraph->nodes with stable cached array (stable addresses for CUDA)
+        cgraph->nodes = (struct ggml_tensor**)cached_stable_nodes;
+
+        // CRITICAL: Copy ALL tensor data to cached stable tensors while preserving addresses
+        // This updates data, buffer, extra, view_src, view_offs, src pointers, and all other fields
+        for (int i = 0; i < cgraph->n_nodes; i++) {
+            memcpy(cgraph->nodes[i], fresh_nodes[i], sizeof(struct ggml_tensor));
+        }
+
+    } else {
+        // Create new stable nodes array
+        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
+
+
+        // Allocate persistent nodes array
+        void** stable_nodes = (void**)malloc(sizeof(void*) * cgraph->n_nodes);
+        if (!stable_nodes) {
+            GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Failed to allocate stable nodes array\n", __func__);
+
+            return 1;
+        }
+        // Copy current node pointers to stable array
+        for (int i = 0; i < cgraph->n_nodes; i++) {
+            stable_nodes[i] = (void*)cgraph->nodes[i];
+        }
+
+        // Cache the stable array
+        backend_stable_nodes_cache[frontend_key] = stable_nodes;
+        backend_stable_nodes_count[frontend_key] = cgraph->n_nodes;
+
+        // Use stable array
+        cgraph->nodes = (struct ggml_tensor**)stable_nodes;
+    }
+#endif
+
 
     ggml_status status;
 #if APIR_BACKEND_CHECK_SUPPORTS_OP == 1
@@ -114,9 +203,17 @@ uint32_t backend_backend_cleanup(apir_encoder * enc, apir_decoder * dec, virgl_a
     GGML_UNUSED(enc);
     GGML_UNUSED(dec);
 
-    if (bck) {
-        ggml_backend_free(bck);
-        bck = NULL;
+    // Clean up cached stable node arrays to prevent memory leaks
+    {
+        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
+
+        for (auto& [key, stable_nodes] : backend_stable_nodes_cache) {
+            if (stable_nodes) {
+                free(stable_nodes);
+            }
+        }
+        backend_stable_nodes_cache.clear();
+        backend_stable_nodes_count.clear();
     }
 
     return 0;

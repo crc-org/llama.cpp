@@ -35,6 +35,10 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     apir_encode_size_t(encoder, &cgraph_size);
 
+    // Send frontend cgraph key for backend caching
+    uintptr_t frontend_key = (uintptr_t)cgraph;
+    apir_encode_uintptr_t(encoder, &frontend_key);
+
     char *       shmem_data    = (char *) shmem->mmap_ptr;
     apir_encoder secondary_enc = apir_new_encoder(shmem_data, cgraph_size);
 
