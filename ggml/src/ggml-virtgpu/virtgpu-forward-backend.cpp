@@ -6,6 +6,26 @@ static long long current_time_ms() {
     return (long long) ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+uint32_t apir_backend_initialize(virtgpu * gpu, void * ggml_backend_reg_fct_p) {
+    apir_encoder *        encoder;
+    apir_decoder *        decoder;
+    ApirForwardReturnCode ret;
+
+    REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_INITIALIZE);
+
+    // Send the backend registration function pointer
+    apir_encode_ptr(encoder, &ggml_backend_reg_fct_p);
+
+    REMOTE_CALL(gpu, encoder, decoder, ret);
+
+    uint32_t result = APIR_BACKEND_INITIALIZE_SUCCESS;
+    apir_decode_uint32_t(decoder, &result);
+
+    remote_call_finish(gpu, encoder, decoder);
+
+    return result;
+}
+
 ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;

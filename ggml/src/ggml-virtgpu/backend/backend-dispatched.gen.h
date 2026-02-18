@@ -30,6 +30,7 @@ uint32_t backend_buffer_clear(apir_encoder * enc, apir_decoder * dec, virgl_apir
 uint32_t backend_buffer_free_buffer(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx);
 
 /* backend */
+uint32_t backend_backend_initialize(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx);
 uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx);
 uint32_t backend_backend_cleanup(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx);
 
@@ -83,6 +84,8 @@ static inline const char * backend_dispatch_command_name(ApirBackendCommandType 
         case APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER:
             return "backend_buffer_free_buffer";
         /* backend */
+        case APIR_COMMAND_TYPE_BACKEND_INITIALIZE:
+            return "backend_backend_initialize";
         case APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE:
             return "backend_backend_graph_compute";
         case APIR_COMMAND_TYPE_BACKEND_CLEANUP:
@@ -129,6 +132,7 @@ static const backend_dispatch_t apir_backend_dispatch_table[APIR_BACKEND_DISPATC
 
     /* backend */
 
+    /* APIR_COMMAND_TYPE_BACKEND_INITIALIZE  = */ backend_backend_initialize,
     /* APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE  = */ backend_backend_graph_compute,
     /* APIR_COMMAND_TYPE_BACKEND_CLEANUP  = */ backend_backend_cleanup,
 };

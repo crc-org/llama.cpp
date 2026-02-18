@@ -140,6 +140,11 @@ functions:
   backend:
     group_description: "backend"
     functions:
+      initialize:
+        frontend_return: "uint32_t"
+        frontend_extra_params:
+        - "void *ggml_backend_reg_fct_p"
+
       graph_compute:
         frontend_return: "ggml_status"
         frontend_extra_params:

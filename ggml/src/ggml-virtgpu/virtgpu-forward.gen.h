@@ -50,5 +50,6 @@ void   apir_buffer_clear(struct virtgpu * gpu, apir_buffer_context_t * buffer_co
 void   apir_buffer_free_buffer(struct virtgpu * gpu, apir_buffer_context_t * buffer_context);
 
 /* backend */
+uint32_t    apir_backend_initialize(struct virtgpu * gpu, void * ggml_backend_reg_fct_p);
 ggml_status apir_backend_graph_compute(struct virtgpu * gpu, ggml_cgraph * cgraph);
 void        apir_backend_cleanup(struct virtgpu * gpu);
