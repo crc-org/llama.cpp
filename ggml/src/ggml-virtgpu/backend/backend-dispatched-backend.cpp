@@ -58,17 +58,6 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
 
-    static bool async_backend_initialized = false;
-    static bool async_backend;
-
-    if (!async_backend_initialized) {
-        ggml_backend_dev_props props;
-
-        dev->iface.get_props(dev, &props);
-        async_backend             = props.caps.async;
-        async_backend_initialized = true;
-    }
-
     uint32_t shmem_res_id;
     apir_decode_virtgpu_shmem_res_id(dec, &shmem_res_id);
 
@@ -80,6 +69,32 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
     size_t cgraph_size;
     apir_decode_size_t(dec, &cgraph_size);
+
+    // Decode combined handle (device + backend ID)
+    uintptr_t combined_handle;
+    apir_decode_uintptr_t(dec, &combined_handle);
+
+    // Decode device and backend ID from handle
+    ggml_backend_dev_t device = (ggml_backend_dev_t)(combined_handle >> 32);
+    uintptr_t backend_id = combined_handle & 0xFFFFFFFF;
+
+    // Get backend instance
+    apir_backend_instance* instance = get_backend_instance(device, backend_id);
+    if (instance == nullptr || instance->bck == nullptr) {
+        apir_decoder_set_fatal(dec);
+        return 1;
+    }
+
+    // Get async backend properties from the device
+    static bool async_backend_initialized = false;
+    static bool async_backend;
+
+    if (!async_backend_initialized) {
+        ggml_backend_dev_props props;
+        device->iface.get_props(device, &props);
+        async_backend = props.caps.async;
+        async_backend_initialized = true;
+    }
 
     // Decode frontend cgraph key for caching
     uintptr_t frontend_key;
@@ -114,15 +129,15 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     void** cached_stable_nodes = nullptr;
 
     {
-        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
-        auto it = backend_stable_nodes_cache.find(frontend_key);
-        if (it != backend_stable_nodes_cache.end()) {
+        std::lock_guard<std::mutex> lock(instance->cache_mutex);
+        auto it = instance->stable_nodes_cache.find(frontend_key);
+        if (it != instance->stable_nodes_cache.end()) {
             cached_stable_nodes = it->second;
         }
     }
 
     // Reuse cached stable node array if structure matches
-    if (cached_stable_nodes && backend_stable_nodes_count[frontend_key] == cgraph->n_nodes) {
+    if (cached_stable_nodes && instance->stable_nodes_count[frontend_key] == cgraph->n_nodes) {
 
         // CRITICAL: Save fresh nodes before replacing with cached stable ones
         struct ggml_tensor** fresh_nodes = cgraph->nodes;
@@ -138,14 +153,11 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 
     } else {
         // Create new stable nodes array
-        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
-
+        std::lock_guard<std::mutex> lock(instance->cache_mutex);
 
         // Allocate persistent nodes array
         void** stable_nodes = (void**)malloc(sizeof(void*) * cgraph->n_nodes);
         if (!stable_nodes) {
-            GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Failed to allocate stable nodes array\n", __func__);
-
             return 1;
         }
         // Copy current node pointers to stable array
@@ -153,9 +165,9 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
             stable_nodes[i] = (void*)cgraph->nodes[i];
         }
 
-        // Cache the stable array
-        backend_stable_nodes_cache[frontend_key] = stable_nodes;
-        backend_stable_nodes_count[frontend_key] = cgraph->n_nodes;
+        // Cache the stable array in backend instance
+        instance->stable_nodes_cache[frontend_key] = stable_nodes;
+        instance->stable_nodes_count[frontend_key] = cgraph->n_nodes;
 
         // Use stable array
         cgraph->nodes = (struct ggml_tensor**)stable_nodes;
@@ -180,17 +192,12 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // Check if backend is properly initialized
-    if (!bck) {
-        GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Backend not initialized (bck is null)\n", __func__);
+    // Backend instance is already validated above
 
-        return 1;
-    }
+    status = instance->bck->iface.graph_compute(instance->bck, cgraph);
 
-    status = bck->iface.graph_compute(bck, cgraph);
-
-    if (async_backend && bck->iface.synchronize) {
-        bck->iface.synchronize(bck);
+    if (async_backend && instance->bck->iface.synchronize) {
+        instance->bck->iface.synchronize(instance->bck);
     }
 
     apir_encode_ggml_status(enc, &status);
@@ -201,20 +208,17 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
 uint32_t backend_backend_cleanup(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
     GGML_UNUSED(enc);
-    GGML_UNUSED(dec);
 
-    // Clean up cached stable node arrays to prevent memory leaks
-    {
-        std::lock_guard<std::mutex> lock(backend_stable_cache_mutex);
+    // Decode combined handle (device + backend ID)
+    uintptr_t combined_handle;
+    apir_decode_uintptr_t(dec, &combined_handle);
 
-        for (auto& [key, stable_nodes] : backend_stable_nodes_cache) {
-            if (stable_nodes) {
-                free(stable_nodes);
-            }
-        }
-        backend_stable_nodes_cache.clear();
-        backend_stable_nodes_count.clear();
-    }
+    // Decode device and backend ID from handle
+    ggml_backend_dev_t device = (ggml_backend_dev_t)(combined_handle >> 32);
+    uintptr_t backend_id = combined_handle & 0xFFFFFFFF;
+
+    // Cleanup specific backend instance
+    cleanup_backend_instance(device, backend_id);
 
     return 0;
 }

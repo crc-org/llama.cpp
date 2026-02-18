@@ -1,5 +1,6 @@
 #include "ggml-remoting.h"
 #include "../../include/ggml-virtgpu.h"
+#include "backend/shared/apir_backend.h"
 
 static const char * ggml_backend_remoting_get_name(ggml_backend_t backend) {
     UNUSED(backend);
@@ -8,17 +9,19 @@ static const char * ggml_backend_remoting_get_name(ggml_backend_t backend) {
 }
 
 static void ggml_backend_remoting_free(ggml_backend_t backend) {
-    // MEMORY LEAK FIX: Notify backend to clean up CUDA graphs before destroying frontend
-    virtgpu * gpu = DEV_TO_GPU(backend->device);
-    apir_backend_cleanup(gpu);
+    ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) backend->context;
+    virtgpu * gpu = ctx->gpu;
+
+    apir_backend_cleanup(gpu, ctx->backend_handle);
 
     delete backend;
 }
 
 static ggml_status ggml_backend_remoting_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
-    virtgpu * gpu = DEV_TO_GPU(backend->device);
+    ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) backend->context;
+    virtgpu * gpu = ctx->gpu;
 
-    return apir_backend_graph_compute(gpu, cgraph);
+    return apir_backend_graph_compute(gpu, ctx->backend_handle, cgraph);
 }
 
 static void ggml_backend_remoting_graph_optimize(ggml_backend_t backend, ggml_cgraph * cgraph) {
@@ -61,6 +64,15 @@ ggml_backend_t ggml_backend_remoting_device_init(ggml_backend_dev_t dev, const c
     UNUSED(params);
 
     ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) dev->context;
+
+    // Initialize the backend handle by calling the backend
+    uint32_t init_result = 0;
+    ctx->backend_handle = apir_backend_initialize(ctx->gpu, (void*)ggml_backend_virtgpu_reg, &init_result);
+
+    if (init_result != APIR_BACKEND_INITIALIZE_SUCCESS) {
+        // Backend initialization failed
+        return nullptr;
+    }
 
     ggml_backend_t remoting_backend = new ggml_backend{
         /* .guid      = */ ggml_backend_remoting_guid(),

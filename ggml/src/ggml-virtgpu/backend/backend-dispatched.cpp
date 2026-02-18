@@ -6,31 +6,186 @@
 #include "ggml-impl.h"
 
 #include <cstdint>
+#include <unordered_map>
+#include <mutex>
 
+// Global variables for device functions
 ggml_backend_reg_t reg = NULL;
 ggml_backend_dev_t dev = NULL;
-ggml_backend_t     bck = NULL;
+
+// Device extension management
+static std::unordered_map<ggml_backend_dev_t, apir_device_extension*> device_extensions;
+static std::mutex device_extensions_mutex;
 
 uint64_t timer_start = 0;
 uint64_t timer_total = 0;
 uint64_t timer_count = 0;
 
-uint32_t backend_dispatch_initialize(void * ggml_backend_reg_fct_p) {
-    if (reg != NULL) {
-        GGML_LOG_WARN(GGML_VIRTGPU_BCK "%s: already initialized\n", __func__);
-        return APIR_BACKEND_INITIALIZE_ALREADY_INITED;
+
+// Get device extension (device-owned backend and cache)
+apir_device_extension* get_device_extension(ggml_backend_dev_t device) {
+    std::lock_guard<std::mutex> lock(device_extensions_mutex);
+    auto it = device_extensions.find(device);
+    if (it == device_extensions.end()) {
+        return nullptr;
+    }
+    apir_device_extension* ext = it->second;
+    if (ext->magic != APIR_DEVICE_EXTENSION_MAGIC) {
+        return nullptr;
+    }
+    return ext;
+}
+
+// Ensure device extension exists
+void ensure_device_extension(ggml_backend_dev_t device) {
+    std::lock_guard<std::mutex> lock(device_extensions_mutex);
+
+    auto it = device_extensions.find(device);
+    if (it == device_extensions.end()) {
+        apir_device_extension* ext = new apir_device_extension();
+        ext->next_backend_id = 1;
+        ext->magic = APIR_DEVICE_EXTENSION_MAGIC;
+        device_extensions[device] = ext;
+    }
+}
+
+// Create new backend instance for device
+uintptr_t create_backend_instance(ggml_backend_dev_t device) {
+    ensure_device_extension(device);
+    apir_device_extension* ext = get_device_extension(device);
+    if (ext == nullptr) {
+        return 0; // Failed
     }
 
-    // Note: The actual initialization work is now done by the frontend
-    // Frontend calls apir_backend_initialize() -> backend_backend_initialize()
-    // This function just checks if initialization was completed by frontend
+    std::lock_guard<std::mutex> lock(ext->backends_mutex);
 
-    if (bck != NULL) {
-        // Frontend already completed initialization
-        return APIR_BACKEND_INITIALIZE_SUCCESS;
+    apir_backend_instance* instance = new apir_backend_instance();
+    instance->bck = device->iface.init_backend(device, NULL);
+    instance->magic = APIR_BACKEND_INSTANCE_MAGIC;
+
+    if (instance->bck == nullptr) {
+        delete instance;
+        return 0; // Failed
     }
 
-    // Frontend hasn't initialized yet - this shouldn't happen in normal flow
-    GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Backend not initialized by frontend\n", __func__);
-    return APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED;
+    uintptr_t backend_id = ext->next_backend_id++;
+    ext->backend_instances[backend_id] = instance;
+
+    return backend_id;
+}
+
+// Get backend instance
+apir_backend_instance* get_backend_instance(ggml_backend_dev_t device, uintptr_t backend_id) {
+    apir_device_extension* ext = get_device_extension(device);
+    if (ext == nullptr) {
+        return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(ext->backends_mutex);
+    auto it = ext->backend_instances.find(backend_id);
+    if (it == ext->backend_instances.end()) {
+        return nullptr;
+    }
+
+    apir_backend_instance* instance = it->second;
+    if (instance->magic != APIR_BACKEND_INSTANCE_MAGIC) {
+        return nullptr;
+    }
+
+    return instance;
+}
+
+// Cleanup specific backend instance
+void cleanup_backend_instance(ggml_backend_dev_t device, uintptr_t backend_id) {
+    apir_device_extension* ext = get_device_extension(device);
+    if (ext == nullptr) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(ext->backends_mutex);
+    auto it = ext->backend_instances.find(backend_id);
+    if (it != ext->backend_instances.end()) {
+        apir_backend_instance* instance = it->second;
+
+        // Free backend
+        if (instance->bck) {
+            ggml_backend_free(instance->bck);
+            instance->bck = nullptr;
+        }
+
+        // Clean up cache
+        {
+            std::lock_guard<std::mutex> cache_lock(instance->cache_mutex);
+            for (auto& [key, stable_nodes] : instance->stable_nodes_cache) {
+                if (stable_nodes) {
+                    free(stable_nodes);
+                }
+            }
+            instance->stable_nodes_cache.clear();
+            instance->stable_nodes_count.clear();
+        }
+
+        instance->magic = 0; // Invalidate
+        delete instance;
+        ext->backend_instances.erase(it);
+    }
+}
+
+// Cleanup device extension and all its backend instances
+void cleanup_device_extension(ggml_backend_dev_t device) {
+    std::lock_guard<std::mutex> lock(device_extensions_mutex);
+
+    auto it = device_extensions.find(device);
+    if (it != device_extensions.end()) {
+        apir_device_extension* ext = it->second;
+
+        // Clean up all backend instances
+        {
+            std::lock_guard<std::mutex> backends_lock(ext->backends_mutex);
+            for (auto& [backend_id, instance] : ext->backend_instances) {
+                if (instance->bck) {
+                    ggml_backend_free(instance->bck);
+                }
+
+                // Clean up cache
+                std::lock_guard<std::mutex> cache_lock(instance->cache_mutex);
+                for (auto& [key, stable_nodes] : instance->stable_nodes_cache) {
+                    if (stable_nodes) {
+                        free(stable_nodes);
+                    }
+                }
+
+                instance->magic = 0;
+                delete instance;
+            }
+            ext->backend_instances.clear();
+        }
+
+        ext->magic = 0; // Invalidate
+        delete ext;
+        device_extensions.erase(it);
+    }
+}
+
+uint32_t backend_dispatch_initialize(void * ggml_backend_reg_fct_p, uintptr_t* out_handle) {
+    GGML_UNUSED(ggml_backend_reg_fct_p); // reg/dev are already set during library loading
+
+    if (out_handle == nullptr) {
+        return APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED;
+    }
+
+    // Ensure global variables are set (should be done during library loading)
+    if (reg == NULL || dev == NULL) {
+        return APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED;
+    }
+
+    // Create new backend instance
+    uintptr_t backend_id = create_backend_instance(dev);
+    if (backend_id == 0) {
+        return APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED;
+    }
+
+    // Return encoded handle: device pointer in upper 32 bits, backend ID in lower 32 bits
+    *out_handle = ((uintptr_t)dev << 32) | (backend_id & 0xFFFFFFFF);
+    return APIR_BACKEND_INITIALIZE_SUCCESS;
 }

@@ -6,7 +6,7 @@ static long long current_time_ms() {
     return (long long) ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-uint32_t apir_backend_initialize(virtgpu * gpu, void * ggml_backend_reg_fct_p) {
+uintptr_t apir_backend_initialize(virtgpu * gpu, void * ggml_backend_reg_fct_p, uint32_t* out_result) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -14,19 +14,27 @@ uint32_t apir_backend_initialize(virtgpu * gpu, void * ggml_backend_reg_fct_p) {
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_INITIALIZE);
 
     // Send the backend registration function pointer
-    apir_encode_ptr(encoder, &ggml_backend_reg_fct_p);
+    uintptr_t function_ptr = (uintptr_t)ggml_backend_reg_fct_p;
+    apir_encode_uintptr_t(encoder, &function_ptr);
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 
     uint32_t result = APIR_BACKEND_INITIALIZE_SUCCESS;
     apir_decode_uint32_t(decoder, &result);
 
+    uintptr_t backend_handle = 0;
+    apir_decode_uintptr_t(decoder, &backend_handle);
+
     remote_call_finish(gpu, encoder, decoder);
 
-    return result;
+    if (out_result) {
+        *out_result = result;
+    }
+
+    return backend_handle;
 }
 
-ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
+ggml_status apir_backend_graph_compute(virtgpu * gpu, uintptr_t backend_handle, ggml_cgraph * cgraph) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
@@ -55,6 +63,9 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
 
     apir_encode_size_t(encoder, &cgraph_size);
 
+    // Send backend handle for context lookup
+    apir_encode_uintptr_t(encoder, &backend_handle);
+
     // Send frontend cgraph key for backend caching
     uintptr_t frontend_key = (uintptr_t)cgraph;
     apir_encode_uintptr_t(encoder, &frontend_key);
@@ -81,12 +92,15 @@ ggml_status apir_backend_graph_compute(virtgpu * gpu, ggml_cgraph * cgraph) {
     return status;
 }
 
-void apir_backend_cleanup(virtgpu * gpu) {
+void apir_backend_cleanup(virtgpu * gpu, uintptr_t backend_handle) {
     apir_encoder *        encoder;
     apir_decoder *        decoder;
     ApirForwardReturnCode ret;
 
     REMOTE_CALL_PREPARE(gpu, encoder, APIR_COMMAND_TYPE_BACKEND_CLEANUP);
+
+    // Send backend handle for context cleanup
+    apir_encode_uintptr_t(encoder, &backend_handle);
 
     REMOTE_CALL(gpu, encoder, decoder, ret);
 

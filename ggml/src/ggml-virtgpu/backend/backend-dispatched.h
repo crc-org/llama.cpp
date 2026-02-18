@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <unordered_map>
+#include <mutex>
 
 #include <ggml-backend.h>
 
@@ -22,4 +24,38 @@ typedef uint32_t (*backend_dispatch_t)(apir_encoder * enc, apir_decoder * dec, v
 
 #include "backend-dispatched.gen.h"
 
-uint32_t backend_dispatch_initialize(void * ggml_backend_reg_fct_p);
+// Backend instance structure - one backend with its own cache
+struct apir_backend_instance {
+    ggml_backend_t bck;  // The actual backend
+
+    // Cache management per backend instance
+    std::mutex cache_mutex;
+    std::unordered_map<uintptr_t, void**> stable_nodes_cache;
+    std::unordered_map<uintptr_t, int> stable_nodes_count;
+
+    uint32_t magic;  // For validation: 0xAB1234CD
+};
+
+// Device extension structure - can have multiple backend instances
+struct apir_device_extension {
+    std::mutex backends_mutex;
+    std::unordered_map<uintptr_t, apir_backend_instance*> backend_instances;
+    uintptr_t next_backend_id;
+
+    uint32_t magic;  // For validation: 0xAB1234CD
+};
+
+#define APIR_DEVICE_EXTENSION_MAGIC 0xAB1234CD
+#define APIR_BACKEND_INSTANCE_MAGIC 0xCD4321BA
+
+// Device extension management
+apir_device_extension* get_device_extension(ggml_backend_dev_t dev);
+void ensure_device_extension(ggml_backend_dev_t dev);
+void cleanup_device_extension(ggml_backend_dev_t dev);
+
+// Backend instance management
+uintptr_t create_backend_instance(ggml_backend_dev_t dev);
+apir_backend_instance* get_backend_instance(ggml_backend_dev_t dev, uintptr_t backend_id);
+void cleanup_backend_instance(ggml_backend_dev_t dev, uintptr_t backend_id);
+
+uint32_t backend_dispatch_initialize(void * ggml_backend_reg_fct_p, uintptr_t* out_handle);

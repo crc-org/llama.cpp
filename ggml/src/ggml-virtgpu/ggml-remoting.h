@@ -36,6 +36,7 @@ struct ggml_backend_remoting_device_context {
     std::vector<std::tuple<void *, size_t, virtgpu_shmem *>> shared_memory;
 
     virtgpu * gpu;
+    uintptr_t backend_handle;  // Handle returned from backend initialization
 };
 
 struct ggml_backend_remoting_buffer_context {

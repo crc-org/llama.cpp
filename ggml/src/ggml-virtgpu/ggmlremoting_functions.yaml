@@ -141,13 +141,15 @@ functions:
     group_description: "backend"
     functions:
       initialize:
-        frontend_return: "uint32_t"
+        frontend_return: "uintptr_t"
         frontend_extra_params:
         - "void *ggml_backend_reg_fct_p"
+        - "uint32_t* out_result"
 
       graph_compute:
         frontend_return: "ggml_status"
         frontend_extra_params:
+        - "uintptr_t backend_handle"
         - "ggml_cgraph *cgraph"
 
       graph_optimize:
@@ -158,6 +160,8 @@ functions:
 
       cleanup:
         frontend_return: "void"
+        frontend_extra_params:
+        - "uintptr_t backend_handle"
 
 # Naming patterns used for code generation
 naming_patterns:
