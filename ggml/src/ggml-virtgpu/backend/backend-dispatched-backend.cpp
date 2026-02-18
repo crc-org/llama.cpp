@@ -90,6 +90,14 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
         return 0;
     }
 #endif
+
+    // Check if backend is properly initialized
+    if (!bck) {
+        GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Backend not initialized (bck is null)\n", __func__);
+
+        return 1;
+    }
+
     status = bck->iface.graph_compute(bck, cgraph);
 
     if (async_backend && bck->iface.synchronize) {
