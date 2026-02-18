@@ -34,7 +34,11 @@ static ggml_backend_buffer_t ggml_backend_remoting_buffer_type_alloc_buffer(ggml
 static const char * ggml_backend_remoting_buffer_type_get_name(ggml_backend_buffer_type_t buft) {
     virtgpu * gpu = BUFT_TO_GPU(buft);
 
-    return gpu->cached_buffer_type.name;
+    // Add virtgpu prefix to identify remoting backend
+    static char prefixed_name[256];
+    snprintf(prefixed_name, sizeof(prefixed_name), "[virtgpu] %s", gpu->cached_buffer_type.name);
+
+    return prefixed_name;
 }
 
 static size_t ggml_backend_remoting_buffer_type_get_alignment(ggml_backend_buffer_type_t buft) {

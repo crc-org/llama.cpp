@@ -3,7 +3,11 @@
 static const char * ggml_backend_remoting_device_get_name(ggml_backend_dev_t dev) {
     virtgpu * gpu = DEV_TO_GPU(dev);
 
-    return gpu->cached_device_info.name;
+    // Add virtgpu prefix to identify remoting backend
+    static char prefixed_name[256];
+    snprintf(prefixed_name, sizeof(prefixed_name), "[virtgpu] %s", gpu->cached_device_info.name);
+
+    return prefixed_name;
 }
 
 static const char * ggml_backend_remoting_device_get_description(ggml_backend_dev_t dev) {
