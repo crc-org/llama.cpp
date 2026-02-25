@@ -36,6 +36,8 @@ struct ggml_backend_remoting_device_context {
     std::vector<std::tuple<void *, size_t, virtgpu_shmem *>> shared_memory;
 
     virtgpu * gpu;
+    uintptr_t device_handle;  // Device handle returned from backend initialization
+    uint32_t  backend_id;     // Backend ID within the device
 };
 
 struct ggml_backend_remoting_buffer_context {
