@@ -6,6 +6,34 @@
 #include "shared/apir_backend.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
+uint32_t backend_backend_initialize(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
+    GGML_UNUSED(ctx);
+
+    // Decode backend initialization request
+    uintptr_t function_ptr;
+    apir_decode_uintptr_t(dec, &function_ptr);
+    void * ggml_backend_reg_fct_p = (void *) function_ptr;
+
+    // Call the actual initialization
+    uintptr_t device_handle = 0;
+    uint32_t  backend_id    = 0;
+    uint32_t  result        = backend_dispatch_initialize(ggml_backend_reg_fct_p, &device_handle, &backend_id);
+
+    // Check if initialization failed
+    if (result != APIR_BACKEND_INITIALIZE_SUCCESS) {
+        // Return error without encoding anything
+        return 1;
+    }
+
+    // Encode the device handle and backend ID separately
+    apir_encode_uintptr_t(enc, &device_handle);
+    apir_encode_uint32_t(enc, &backend_id);
+
+    return 0;
+}
 
 static uint32_t validate_graph_operation(size_t cgraph_size, uint32_t shmem_res_id, const char * operation) {
     if (cgraph_size == 0) {
@@ -23,17 +51,6 @@ static uint32_t validate_graph_operation(size_t cgraph_size, uint32_t shmem_res_
 uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
     GGML_UNUSED(ctx);
 
-    static bool async_backend_initialized = false;
-    static bool async_backend;
-
-    if (!async_backend_initialized) {
-        ggml_backend_dev_props props;
-
-        dev->iface.get_props(dev, &props);
-        async_backend             = props.caps.async;
-        async_backend_initialized = true;
-    }
-
     uint32_t shmem_res_id;
     apir_decode_virtgpu_shmem_res_id(dec, &shmem_res_id);
 
@@ -45,6 +62,29 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
     size_t cgraph_size;
     apir_decode_size_t(dec, &cgraph_size);
+
+    // Decode device handle first
+    uintptr_t device_handle;
+    apir_decode_uintptr_t(dec, &device_handle);
+    ggml_backend_dev_t device = (ggml_backend_dev_t) device_handle;
+
+    // Decode backend ID second
+    uint32_t backend_id;
+    apir_decode_uint32_t(dec, &backend_id);
+
+    // Get backend instance
+    apir_backend_instance * instance = get_backend_instance(device, backend_id);
+    if (instance == nullptr || instance->bck == nullptr) {
+        apir_decoder_set_fatal(dec);
+        return 1;
+    }
+
+    // Get device context for async property
+    apir_device_context * ext = get_device_context(device);
+    if (ext == nullptr) {
+        apir_decoder_set_fatal(dec);
+        return 1;
+    }
 
     if (validate_graph_operation(cgraph_size, shmem_res_id, __func__) != 0) {
         apir_decoder_set_fatal(dec);
@@ -83,20 +123,34 @@ uint32_t backend_backend_graph_compute(apir_encoder * enc, apir_decoder * dec, v
     }
 #endif
 
-    // Check if backend is properly initialized
-    if (!bck) {
-        GGML_LOG_ERROR(GGML_VIRTGPU_BCK "%s: Backend not initialized (bck is null)\n", __func__);
+    // Backend instance is already validated above
 
-        return 1;
-    }
+    status = instance->bck->iface.graph_compute(instance->bck, cgraph);
 
-    status = bck->iface.graph_compute(bck, cgraph);
-
-    if (async_backend && bck->iface.synchronize) {
-        bck->iface.synchronize(bck);
+    if (ext->async_backend && instance->bck->iface.synchronize) {
+        instance->bck->iface.synchronize(instance->bck);
     }
 
     apir_encode_ggml_status(enc, &status);
+
+    return 0;
+}
+
+uint32_t backend_backend_cleanup(apir_encoder * enc, apir_decoder * dec, virgl_apir_context * ctx) {
+    GGML_UNUSED(ctx);
+    GGML_UNUSED(enc);
+
+    // Decode device handle first
+    uintptr_t device_handle;
+    apir_decode_uintptr_t(dec, &device_handle);
+    ggml_backend_dev_t device = (ggml_backend_dev_t) device_handle;
+
+    // Decode backend ID second
+    uint32_t backend_id;
+    apir_decode_uint32_t(dec, &backend_id);
+
+    // Cleanup specific backend instance
+    cleanup_backend_instance(device, backend_id);
 
     return 0;
 }
