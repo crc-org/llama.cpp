@@ -29,10 +29,12 @@ typedef enum ApirBackendCommandType {
     APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER = 21,
 
     /* backend */
-    APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 22,
+    APIR_COMMAND_TYPE_BACKEND_INITIALIZE    = 22,
+    APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE = 23,
+    APIR_COMMAND_TYPE_BACKEND_CLEANUP       = 24,
 
     // last command_type index + 1
-    APIR_BACKEND_DISPATCH_TABLE_COUNT = 23,
+    APIR_BACKEND_DISPATCH_TABLE_COUNT = 25,
 } ApirBackendCommandType;
 
 static inline const char * apir_dispatch_command_name(ApirBackendCommandType type) {
@@ -85,8 +87,12 @@ static inline const char * apir_dispatch_command_name(ApirBackendCommandType typ
         case APIR_COMMAND_TYPE_BUFFER_FREE_BUFFER:
             return "buffer_free_buffer";
         /* backend */
+        case APIR_COMMAND_TYPE_BACKEND_INITIALIZE:
+            return "backend_initialize";
         case APIR_COMMAND_TYPE_BACKEND_GRAPH_COMPUTE:
             return "backend_graph_compute";
+        case APIR_COMMAND_TYPE_BACKEND_CLEANUP:
+            return "backend_cleanup";
 
         default:
             return "unknown";

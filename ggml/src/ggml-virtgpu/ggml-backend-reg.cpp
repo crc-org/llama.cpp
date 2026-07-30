@@ -133,10 +133,12 @@ static void ggml_backend_remoting_reg_init_devices(ggml_backend_reg_t reg) {
                 ggml_backend_remoting_device_context * ctx       = new ggml_backend_remoting_device_context;
                 char                                   desc[256] = "ggml-virtgpu API Remoting device";
 
-                ctx->device      = i;
-                ctx->name        = GGML_VIRTGPU_NAME + std::to_string(i);
-                ctx->description = desc;
-                ctx->gpu         = gpu;
+                ctx->device        = i;
+                ctx->name          = GGML_VIRTGPU_NAME + std::to_string(i);
+                ctx->description   = desc;
+                ctx->gpu           = gpu;
+                ctx->device_handle = 0;  // Will be set during backend initialization
+                ctx->backend_id    = 0;  // Will be set during backend initialization
 
                 ggml_backend_dev_t dev = new ggml_backend_device{
                     /* .iface   = */ ggml_backend_remoting_device_interface,

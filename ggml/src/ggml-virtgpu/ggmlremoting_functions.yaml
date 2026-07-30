@@ -140,9 +140,18 @@ functions:
   backend:
     group_description: "backend"
     functions:
+      initialize:
+        frontend_return: "int"
+        frontend_extra_params:
+        - "void *ggml_backend_reg_fct_p"
+        - "uintptr_t* out_device_handle"
+        - "uint32_t* out_backend_id"
+
       graph_compute:
         frontend_return: "ggml_status"
         frontend_extra_params:
+        - "uintptr_t device_handle"
+        - "uint32_t backend_id"
         - "ggml_cgraph *cgraph"
 
       graph_optimize:
@@ -150,6 +159,12 @@ functions:
         frontend_extra_params:
         - "ggml_cgraph *cgraph"
         enabled: false
+
+      cleanup:
+        frontend_return: "void"
+        frontend_extra_params:
+        - "uintptr_t device_handle"
+        - "uint32_t backend_id"
 
 # Naming patterns used for code generation
 naming_patterns:

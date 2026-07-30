@@ -1,4 +1,5 @@
 #include "../../include/ggml-virtgpu.h"
+#include "backend/shared/apir_backend.h"
 #include "ggml-remoting.h"
 
 static const char * ggml_backend_remoting_get_name(ggml_backend_t backend) {
@@ -8,13 +9,19 @@ static const char * ggml_backend_remoting_get_name(ggml_backend_t backend) {
 }
 
 static void ggml_backend_remoting_free(ggml_backend_t backend) {
+    ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) backend->context;
+    virtgpu *                              gpu = ctx->gpu;
+
+    apir_backend_cleanup(gpu, ctx->device_handle, ctx->backend_id);
+
     delete backend;
 }
 
 static ggml_status ggml_backend_remoting_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
-    virtgpu * gpu = DEV_TO_GPU(backend->device);
+    ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) backend->context;
+    virtgpu *                              gpu = ctx->gpu;
 
-    return apir_backend_graph_compute(gpu, cgraph);
+    return apir_backend_graph_compute(gpu, ctx->device_handle, ctx->backend_id, cgraph);
 }
 
 static void ggml_backend_remoting_graph_optimize(ggml_backend_t backend, ggml_cgraph * cgraph) {
@@ -59,6 +66,16 @@ ggml_backend_t ggml_backend_remoting_device_init(ggml_backend_dev_t dev, const c
     UNUSED(params);
 
     ggml_backend_remoting_device_context * ctx = (ggml_backend_remoting_device_context *) dev->context;
+
+    // Initialize the backend by calling the backend
+    int init_result =
+        apir_backend_initialize(ctx->gpu, (void *) ggml_backend_virtgpu_reg, &ctx->device_handle, &ctx->backend_id);
+
+    if (init_result != APIR_BACKEND_INITIALIZE_SUCCESS) {
+        // Backend initialization failed
+        GGML_LOG_ERROR(GGML_VIRTGPU "%s: Backend initialization failed with result=%d\n", __func__, init_result);
+        return nullptr;
+    }
 
     ggml_backend_t remoting_backend = new ggml_backend{
         /* .guid      = */ ggml_backend_remoting_guid(),

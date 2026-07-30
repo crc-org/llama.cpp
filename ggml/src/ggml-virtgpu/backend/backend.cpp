@@ -97,9 +97,26 @@ ApirLoadLibraryReturnCode apir_backend_initialize(uint32_t virgl_ctx_id, struct 
         return APIR_LOAD_LIBRARY_SYMBOL_MISSING;
     }
 
-    uint32_t ret = backend_dispatch_initialize(ggml_backend_reg_fct);
+    typedef ggml_backend_reg_t (*ggml_backend_reg_fct_t)(void);
+    ggml_backend_reg_fct_t backend_reg_fct = (ggml_backend_reg_fct_t) ggml_backend_reg_fct;
 
-    return (ApirLoadLibraryReturnCode) (APIR_LOAD_LIBRARY_INIT_BASE_INDEX + ret);
+    if (backend_reg_fct == NULL) {
+        return APIR_LOAD_LIBRARY_SYMBOL_MISSING;
+    }
+
+    reg = backend_reg_fct();
+    if (reg == NULL) {
+        return (ApirLoadLibraryReturnCode) (APIR_LOAD_LIBRARY_INIT_BASE_INDEX +
+                                            APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED);
+    }
+
+    dev = ggml_backend_reg_dev_get(reg, 0);
+    if (dev == NULL) {
+        return (ApirLoadLibraryReturnCode) (APIR_LOAD_LIBRARY_INIT_BASE_INDEX +
+                                            APIR_BACKEND_INITIALIZE_BACKEND_INIT_FAILED);
+    }
+
+    return APIR_LOAD_LIBRARY_SUCCESS;
 }
 
 uint32_t apir_backend_dispatcher(uint32_t               virgl_ctx_id,
